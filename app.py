@@ -32,7 +32,9 @@ from inventory_tools import (
     calculate_fixed_period_review,
     calculate_newsvendor,
     generate_eoq_cost_curve,
-    generate_newsvendor_curve
+    generate_newsvendor_curve,
+    validate_inventory_csv_columns,
+    analyze_inventory_dataframe
 )
 
 
@@ -195,6 +197,86 @@ def run_streamlit():
         st.divider()
         st.caption("BAN 517 Supply Chain Analytics Project")
         st.caption("Deterministic Numerical Engine: Python `inventory_tools.py`")
+
+        # Section: Data Upload (Last section in the sidebar)
+        st.divider()
+        st.header("Data Upload")
+        uploaded_file = st.file_uploader("Upload CSV File", type=["csv"])
+
+    # -------------------------------------------------------------------------
+    # Uploaded CSV Data Processing and Analysis
+    # -------------------------------------------------------------------------
+    if uploaded_file is not None:
+        try:
+            uploaded_df = pd.read_csv(uploaded_file)
+            missing_cols = validate_inventory_csv_columns(uploaded_df)
+
+            if missing_cols:
+                st.error(
+                    f"❌ **Missing Required Columns**: `{', '.join(missing_cols)}`.\n\n"
+                    f"The uploaded CSV must contain the following required columns: "
+                    f"`Product`, `Category`, `Units`, `Unit Cost`."
+                )
+            else:
+                # Execute deterministic pandas analysis
+                analysis = analyze_inventory_dataframe(uploaded_df)
+                processed_df = analysis["df"]
+
+                st.header("📁 Uploaded Inventory Data & Analysis")
+
+                # Display Dataset Dimensions & Column Names
+                st.subheader("Dataset Dimensions & Schema")
+                dim_col1, dim_col2, dim_col3 = st.columns([1, 1, 2])
+                dim_col1.metric("Number of Rows", f"{analysis['rows']:,}")
+                dim_col2.metric("Number of Columns", f"{analysis['columns']:,}")
+                dim_col3.write(f"**Column Names**: {', '.join([f'`{c}`' for c in analysis['column_names']])}")
+
+                st.write("")
+
+                # Display Core Analytical Summary Results
+                st.subheader("Key Inventory Analysis Results")
+                kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+                kpi1.metric("Total Units", f"{analysis['total_units']:,.0f}")
+                kpi2.metric("Average Unit Cost", f"${analysis['avg_unit_cost']:,.2f}")
+                kpi3.metric(
+                    "Product with Highest Units",
+                    analysis["product_highest_units"],
+                    f"{analysis['highest_units_count']:,.0f} units"
+                )
+                kpi4.metric("Total Inventory Value", f"${analysis['total_inventory_value']:,.2f}")
+
+                st.write("")
+
+                # Category Grouping and Complete Processed Dataframe
+                cat_col, table_col = st.columns([1, 2])
+                with cat_col:
+                    st.subheader("Total Units by Category")
+                    st.dataframe(
+                        analysis["total_units_by_category"],
+                        column_config={
+                            "Category": st.column_config.TextColumn("Category"),
+                            "Total Units": st.column_config.NumberColumn("Total Units", format="%d")
+                        },
+                        hide_index=True,
+                        use_container_width=True
+                    )
+
+                with table_col:
+                    st.subheader("Uploaded Dataframe (with Inventory Value)")
+                    st.dataframe(
+                        processed_df,
+                        column_config={
+                            "Units": st.column_config.NumberColumn("Units", format="%d"),
+                            "Unit Cost": st.column_config.NumberColumn("Unit Cost", format="$%.2f"),
+                            "Inventory Value": st.column_config.NumberColumn("Inventory Value", format="$%.2f")
+                        },
+                        use_container_width=True
+                    )
+
+                st.divider()
+
+        except Exception as e:
+            st.error(f"❌ Error processing uploaded CSV file: {str(e)}")
 
     # Main Tabs: Natural Language Agent vs. Interactive Calculators
     tab_agent, tab_calculators = st.tabs(["🤖 Natural Language Decision Agent", "🧮 Interactive Direct Calculators"])
