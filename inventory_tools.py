@@ -1478,3 +1478,93 @@ def generate_newsvendor_curve(
             "expected_leftover": round(exp_leftover, 1)
         })
     return curve
+
+
+# =============================================================================
+# CSV Data Analysis Utilities
+# =============================================================================
+
+REQUIRED_CSV_COLUMNS = ["Product", "Category", "Units", "Unit Cost"]
+
+
+def validate_inventory_csv_columns(df: Any) -> List[str]:
+    """
+    Validates that required columns (Product, Category, Units, Unit Cost) exist.
+    Returns a list of missing column names. Empty list means all columns are present.
+    """
+    return [col for col in REQUIRED_CSV_COLUMNS if col not in df.columns]
+
+
+def analyze_inventory_dataframe(df_input: Any) -> Dict[str, Any]:
+    """
+    Performs deterministic pandas analytics on the uploaded inventory DataFrame:
+    1. Validates required columns (Product, Category, Units, Unit Cost).
+    2. Calculates total Units.
+    3. Calculates average Unit Cost.
+    4. Identifies the Product with the highest Units.
+    5. Groups data by Category and calculates total Units for each Category.
+    6. Adds new calculated column: Inventory Value = Units * Unit Cost.
+    7. Calculates total Inventory Value across all products.
+
+    Returns a structured dictionary containing all calculations and the augmented DataFrame.
+    """
+    import pandas as pd
+
+    missing = validate_inventory_csv_columns(df_input)
+    if missing:
+        raise ValueError(f"Missing required columns: {', '.join(missing)}")
+
+    df = df_input.copy()
+
+    # Clean numeric fields if strings/commas/currency symbols exist
+    if not pd.api.types.is_numeric_dtype(df["Units"]):
+        df["Units"] = df["Units"].astype(str).str.replace(",", "", regex=False).str.strip()
+    df["Units"] = pd.to_numeric(df["Units"], errors="coerce").fillna(0)
+
+    if not pd.api.types.is_numeric_dtype(df["Unit Cost"]):
+        df["Unit Cost"] = df["Unit Cost"].astype(str).str.replace("$", "", regex=False).str.replace(",", "", regex=False).str.strip()
+    df["Unit Cost"] = pd.to_numeric(df["Unit Cost"], errors="coerce").fillna(0.0)
+
+    # 1. Total Units
+    total_units = float(df["Units"].sum())
+
+    # 2. Average Unit Cost
+    avg_unit_cost = float(df["Unit Cost"].mean()) if len(df) > 0 else 0.0
+
+    # 3. Product with highest Units
+    if len(df) > 0:
+        idx_max = df["Units"].idxmax()
+        highest_units_product = str(df.loc[idx_max, "Product"])
+        highest_units_count = float(df.loc[idx_max, "Units"])
+    else:
+        highest_units_product = "None"
+        highest_units_count = 0.0
+
+    # 4. Group data by Category and calculate total Units for each Category
+    category_group = (
+        df.groupby("Category", as_index=False)["Units"]
+        .sum()
+        .rename(columns={"Units": "Total Units"})
+        .sort_values(by="Total Units", ascending=False)
+        .reset_index(drop=True)
+    )
+
+    # 5. Create new calculated column: Inventory Value = Units * Unit Cost
+    df["Inventory Value"] = df["Units"] * df["Unit Cost"]
+
+    # 6. Calculate total Inventory Value across all products
+    total_inventory_value = float(df["Inventory Value"].sum())
+
+    return {
+        "df": df,
+        "rows": len(df),
+        "columns": len(df.columns),
+        "column_names": df.columns.tolist(),
+        "total_units": total_units,
+        "avg_unit_cost": avg_unit_cost,
+        "product_highest_units": highest_units_product,
+        "highest_units_count": highest_units_count,
+        "total_units_by_category": category_group,
+        "total_inventory_value": total_inventory_value
+    }
+
