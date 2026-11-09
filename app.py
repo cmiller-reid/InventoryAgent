@@ -203,6 +203,23 @@ def run_streamlit():
         st.header("Data Upload")
         uploaded_file = st.file_uploader("Upload CSV File", type=["csv"])
 
+        sample_csv_data = (
+            "Product,Category,Units,Unit Cost\n"
+            "Widget Alpha,Electronics,450,15.50\n"
+            "Sensor Beta,Electronics,1200,8.25\n"
+            "Steel Bolt Pack,Hardware,3500,1.10\n"
+            "Torque Wrench,Tools,180,45.00\n"
+            "Safety Goggles,PPE,850,5.75\n"
+        )
+        st.download_button(
+            label="📥 Download Sample CSV",
+            data=sample_csv_data,
+            file_name="sample_inventory.csv",
+            mime="text/csv",
+            help="Download a formatted sample CSV to test the Data Upload feature immediately.",
+            use_container_width=True
+        )
+
     # -------------------------------------------------------------------------
     # Uploaded CSV Data Processing and Analysis
     # -------------------------------------------------------------------------
@@ -277,6 +294,14 @@ def run_streamlit():
 
         except Exception as e:
             st.error(f"❌ Error processing uploaded CSV file: {str(e)}")
+    else:
+        # Guidance notice when no CSV is currently uploaded
+        st.info(
+            "💡 **CSV Inventory Data Upload & Analysis Available**: "
+            "To analyze bulk inventory data, use the **'Upload CSV File'** widget at the bottom of the left sidebar "
+            "(or click **'📥 Download Sample CSV'** in the sidebar to download a test file). "
+            "Required columns: `Product`, `Category`, `Units`, `Unit Cost`."
+        )
 
     # Main Tabs: Natural Language Agent vs. Interactive Calculators
     tab_agent, tab_calculators = st.tabs(["🤖 Natural Language Decision Agent", "🧮 Interactive Direct Calculators"])
@@ -569,18 +594,25 @@ def run_streamlit():
 # =============================================================================
 
 if __name__ == "__main__":
-    # If run through `streamlit run app.py`, 'streamlit' is in sys.modules and runs streamlit
-    # If run through `python app.py`, provide CLI interface
-    if "streamlit" in sys.modules and any("streamlit" in arg for arg in sys.argv):
+    is_streamlit = False
+    try:
+        import streamlit.runtime
+        if streamlit.runtime.exists():
+            is_streamlit = True
+    except Exception:
+        pass
+
+    if is_streamlit or ("streamlit" in sys.modules and any("streamlit" in str(arg).lower() for arg in sys.argv)):
         run_streamlit()
+    elif len(sys.argv) > 1 and sys.argv[1].lower() in ["--cli", "-c"]:
+        run_cli()
     else:
-        # Check if launched via `streamlit run`
         try:
             import streamlit.runtime
             if streamlit.runtime.exists():
                 run_streamlit()
             else:
                 run_cli()
-        except ImportError:
+        except Exception:
             run_cli()
 
