@@ -490,9 +490,9 @@ def run_streamlit():
                     column_config={
                         "Sales ($)": st.column_config.NumberColumn("Sales ($)", format="$%,.2f"),
                         "POS Hits": st.column_config.NumberColumn("POS Hits", format="%d"),
-                        "Sales Cumulative Pct": st.column_config.NumberColumn("Sales Cum %", format="%.2f%%"),
+                        "Sales Cumulative Pct": st.column_config.NumberColumn("Sales Cum %", format="%.0f%%"),
                         "Sales Score": st.column_config.NumberColumn("Sales Score", format="%.0f"),
-                        "POS Hits Cumulative Pct": st.column_config.NumberColumn("POS Hits Cum %", format="%.2f%%"),
+                        "POS Hits Cumulative Pct": st.column_config.NumberColumn("POS Hits Cum %", format="%.0f%%"),
                         "POS Hits Score": st.column_config.NumberColumn("POS Hits Score", format="%.0f"),
                         "Combined Weighted Score": st.column_config.NumberColumn("Combined Weighted Score", format="%.2f"),
                         "Final Inventory Class": st.column_config.TextColumn("Final Inventory Class")

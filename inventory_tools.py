@@ -1637,49 +1637,55 @@ def classify_inventory_multicriteria(
     def assign_class(cum_pct_series: pd.Series, cutoffs: Tuple[float, float, float]) -> pd.Series:
         classes = []
         c0, c1, c2 = cutoffs
-        # Map discrete Pareto brackets:
-        # Bracket A: 0% to 60%  -> cumulative share < 61% (0.61)
-        # Bracket B: 61% to 80% -> cumulative share < 81% (0.81)
-        # Bracket C: 81% to 90% -> cumulative share < 91% (0.91)
-        # Bracket D: 91% to 100% -> cumulative share >= 91% (0.91)
-        # Handles both (0.61, 0.81, 0.91) and legacy (0.60, 0.80, 0.90) gracefully.
-        threshold_a = c0 if c0 > 0.60 else 0.61
-        threshold_b = c1 if c1 > 0.80 else 0.81
-        threshold_c = c2 if c2 > 0.90 else 0.91
+        # Normalize thresholds to 0-100 percentage scale:
+        # e.g. 0.61 -> 61.0, 0.81 -> 81.0, 0.91 -> 91.0
+        # If passed as 0.60/60 -> 61.0, 0.80/80 -> 81.0, 0.90/90 -> 91.0
+        t_a = c0 * 100.0 if c0 <= 1.0 else c0
+        t_b = c1 * 100.0 if c1 <= 1.0 else c1
+        t_c = c2 * 100.0 if c2 <= 1.0 else c2
 
-        for idx, pct in enumerate(cum_pct_series):
-            rounded_pct = round(float(pct), 6)
+        if t_a <= 60.0:
+            t_a = 61.0
+        if t_b <= 80.0:
+            t_b = 81.0
+        if t_c <= 90.0:
+            t_c = 91.0
+
+        for idx, val in enumerate(cum_pct_series):
+            # Ensure val is on 0-100 percentage scale
+            pct_100 = float(val) if float(val) > 1.0 else float(val) * 100.0
+            rounded_pct = round(pct_100, 4)
             if idx == 0:
                 # Top contributor is always Class A
                 classes.append("A")
-            elif rounded_pct < threshold_a:  # 0 to 60.99% -> A
+            elif rounded_pct < t_a:  # 0 to 60.99% -> A
                 classes.append("A")
-            elif rounded_pct < threshold_b:  # 61.00 to 80.99% -> B
+            elif rounded_pct < t_b:  # 61.00 to 80.99% -> B
                 classes.append("B")
-            elif rounded_pct < threshold_c:  # 81.00 to 90.99% -> C
+            elif rounded_pct < t_c:  # 81.00 to 90.99% -> C
                 classes.append("C")
-            else:                            # 91.00% to 100% -> D
+            else:                    # 91.00% to 100% -> D
                 classes.append("D")
         return pd.Series(classes, index=cum_pct_series.index)
 
     # 1A. Stratify by Sales ($)
     df_sorted_sales = df.sort_values(by="_clean_sales", ascending=False).copy()
     if total_sales > 0:
-        df_sorted_sales["Sales Share"] = df_sorted_sales["_clean_sales"] / total_sales
-        df_sorted_sales["Sales Cumulative Pct"] = df_sorted_sales["_clean_sales"].cumsum() / total_sales
+        df_sorted_sales["Sales Share"] = (df_sorted_sales["_clean_sales"] / total_sales) * 100.0
+        df_sorted_sales["Sales Cumulative Pct"] = (df_sorted_sales["_clean_sales"].cumsum() / total_sales) * 100.0
     else:
         df_sorted_sales["Sales Share"] = 0.0
         df_sorted_sales["Sales Cumulative Pct"] = 0.0
 
     df_sorted_sales["Sales Class"] = assign_class(df_sorted_sales["Sales Cumulative Pct"], sales_cutoffs)
     df["Sales Class"] = df_sorted_sales["Sales Class"]
-    df["Sales Cumulative Pct"] = df_sorted_sales["Sales Cumulative Pct"]
+    df["Sales Cumulative Pct"] = df_sorted_sales["Sales Cumulative Pct"].round(2)
 
     # 1B. Stratify by POS Hits
     df_sorted_hits = df.sort_values(by="_clean_hits", ascending=False).copy()
     if total_hits > 0:
-        df_sorted_hits["Hits Share"] = df_sorted_hits["_clean_hits"] / total_hits
-        df_sorted_hits["Hits Cumulative Pct"] = df_sorted_hits["_clean_hits"].cumsum() / total_hits
+        df_sorted_hits["Hits Share"] = (df_sorted_hits["_clean_hits"] / total_hits) * 100.0
+        df_sorted_hits["Hits Cumulative Pct"] = (df_sorted_hits["_clean_hits"].cumsum() / total_hits) * 100.0
     else:
         df_sorted_hits["Hits Share"] = 0.0
         df_sorted_hits["Hits Cumulative Pct"] = 0.0
@@ -1687,7 +1693,7 @@ def classify_inventory_multicriteria(
     df_sorted_hits["Hits Class"] = assign_class(df_sorted_hits["Hits Cumulative Pct"], hits_cutoffs)
     df["Hits Class"] = df_sorted_hits["Hits Class"]
     df["POS Hits Class"] = df["Hits Class"]
-    df["Hits Cumulative Pct"] = df_sorted_hits["Hits Cumulative Pct"]
+    df["Hits Cumulative Pct"] = df_sorted_hits["Hits Cumulative Pct"].round(2)
     df["POS Hits Cumulative Pct"] = df["Hits Cumulative Pct"]
 
     # 1C. Convert each Sales class and POS Hits class to numerical score: A=4, B=3, C=2, D=1
