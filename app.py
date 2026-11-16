@@ -388,11 +388,13 @@ def run_streamlit():
                 m_type = response.model_type
 
                 if m_type == InventoryModelType.EOQ:
-                    k1, k2, k3, k4 = st.columns(4)
+                    k1, k2, k3, k4, k5, k6 = st.columns(6)
                     k1.metric("Optimal EOQ", f"{res['eoq_rounded']:,} units", f"Exact: {res['eoq']:.1f}")
-                    k2.metric("Total Annual Inv Cost", f"${res['total_annual_inventory_cost']:,.2f}")
-                    k3.metric("Order Frequency", f"{res['orders_per_year']:.1f} orders/yr")
-                    k4.metric("Order Cycle Time", f"{res['cycle_time_days']:.0f} work days")
+                    k2.metric("Order Frequency", f"{res['orders_per_year']:.1f} orders/yr")
+                    k3.metric("Order Cycle Time", f"{res['cycle_time_days']:.0f} work days ({res['cycle_time_years']:.2f} yr)")
+                    k4.metric("Annual Ordering Cost", f"${res['annual_ordering_cost']:,.2f}")
+                    k5.metric("Annual Holding Cost", f"${res['annual_holding_cost']:,.2f}")
+                    k6.metric("Total Annual Inv Cost", f"${res['total_annual_inventory_cost']:,.2f}")
 
                 elif m_type == InventoryModelType.QUANTITY_DISCOUNT:
                     k1, k2, k3, k4 = st.columns(4)
