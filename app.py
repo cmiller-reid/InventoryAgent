@@ -803,7 +803,7 @@ def run_streamlit():
                     with k4:
                         st.markdown(render_metric_card("In-Stock Probability", f"{res['in_stock_probability']:.1%}"), unsafe_allow_html=True)
 
-                # Visual Charts (reordered immediately after metric cards)
+                # Visual Charts (rendered immediately after metric cards)
                 if response.visualization_data:
                     st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
                     st.subheader("Visual Optimization Curves")
@@ -838,7 +838,14 @@ def run_streamlit():
                         ).interactive()
                         st.altair_chart(chart, use_container_width=True)
 
-                # Verification & Sanity Checks (rendered after Visual Optimization Curves)
+                # Analytical Derivation & Managerial Insights (rendered immediately after Visual Optimization Curves)
+                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                st.subheader("Analytical Derivation & Managerial Insights")
+                # Strip out any appended duplicate 8-section scrolling list, keeping the derivation, equations, and cadence
+                clean_explanation = response.detailed_explanation.split("### 🎓 Student Verification Breakdown")[0].rstrip("-\n ")
+                st.markdown(clean_explanation)
+
+                # Verification & Sanity Checks (rendered after Analytical Derivation)
                 st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
                 st.subheader("Automated Mathematical & Operational Verification")
                 for check in response.verification_checks:
@@ -849,8 +856,9 @@ def run_streamlit():
                     else:
                         st.error(f"**{check.name} [FAILED]**: {check.message}")
 
-                # Dedicated 8-Part Student Verification Breakdown for BAN 517
+                # Dedicated 8-Part Student Verification Breakdown for BAN 517 (Interactive tabbed version)
                 if "inputs_extracted" in res or "intermediate_calculations" in res:
+                    st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
                     st.subheader("🎓 Student Verification Breakdown (8 Mandatory Sections)")
                     with st.expander("Click to expand/collapse interactive 8-Point Academic Verification tabs", expanded=True):
                         v_tab1, v_tab2, v_tab3, v_tab4 = st.tabs([
@@ -899,10 +907,6 @@ def run_streamlit():
                             st.markdown("#### 8. Assumptions")
                             for i, a in enumerate(res.get("assumptions", []), 1):
                                 st.markdown(f"{i}. {a}")
-
-                # Detailed Explanation & KaTeX derivation
-                st.subheader("Analytical Derivation & Managerial Insights")
-                st.markdown(response.detailed_explanation)
 
     # -------------------------------------------------------------------------
     # TAB 2: Direct Calculators (What-If Analysis)
