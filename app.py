@@ -15,6 +15,7 @@ Provides:
 """
 
 import sys
+import re
 from typing import Optional
 import pandas as pd
 import numpy as np
@@ -660,11 +661,21 @@ def run_streamlit():
                         st.info(trace.summary)
 
             if response.success and response.calculation_result:
-                # Executive Recommendation
-                st.subheader("2. Executive Recommendation")
+                # Custom HTML/CSS Dark-Navy Executive Decision Recommendation Banner Card
+                rec_html = re.sub(r"\*\*(.*?)\*\*", r"<strong>\1</strong>", response.executive_recommendation)
                 st.markdown(
-                    f"""<div style="background-color: #e8f0fe; border-left: 6px solid #1a73e8; padding: 16px 20px; border-radius: 6px; font-size: 1.05em; color: #174ea6;">
-                    {response.executive_recommendation}
+                    f"""<div style="background-color: #0f172a; border-radius: 10px; border-left: 5px solid #2563eb; padding: 18px 22px; margin-bottom: 20px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                            <div style="font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; color: #60a5fa; text-transform: uppercase;">
+                                EXECUTIVE DECISION RECOMMENDATION
+                            </div>
+                            <div style="background-color: #1e293b; color: #93c5fd; font-size: 0.75rem; padding: 4px 12px; border-radius: 999px; white-space: nowrap;">
+                                {response.model_type.value} • Conf: {response.confidence:.0%}
+                            </div>
+                        </div>
+                        <div style="font-size: 1.05rem; font-weight: 500; color: #f8fafc; line-height: 1.5;">
+                            {rec_html}
+                        </div>
                     </div>""",
                     unsafe_allow_html=True
                 )
