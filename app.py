@@ -316,7 +316,8 @@ def run_streamlit():
                     <div style="font-weight: 700; color: #1a73e8; margin-bottom: 6px; font-size: 1.0rem;">📚 Multicriteria Stratification Methodology</div>
                     <ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
                         <li><b>Step 1 — Classify Sales and POS Hits Separately</b>: Rank items independently using Pareto thresholds:
-                            <b>A</b> (0 to 60%), <b>B</b> (61 to 80%), <b>C</b> (81 to 90%), and <b>D</b> (91 to 100%).
+                            <b>A</b> (0 to 60% cumulative share; &lt; 61%), <b>B</b> (61 to 80% cumulative share; &lt; 81%),
+                            <b>C</b> (81 to 90% cumulative share; &lt; 91%), and <b>D</b> (91 to 100% cumulative share; ≥ 91%).
                             Convert each class to a numerical score: <b>A = 4, B = 3, C = 2, D = 1</b>.</li>
                         <li><b>Step 2 — Calculate Combined Weighted Score</b>: Weighted at <b>65% for Sales</b> and <b>35% for POS Hits</b>:<br>
                             <code>Combined Weighted Score = 0.65(Sales Score) + 0.35(Hits Score)</code><br>
@@ -340,6 +341,8 @@ def run_streamlit():
                     w_col3.info(
                         f"**Current Scoring Formula**:\n"
                         f"Combined Weighted Score = ({sales_weight_pct/100:.2f} × Sales Score) + ({hits_weight_pct/100:.2f} × Hits Score)\n\n"
+                        f"**Pareto Thresholds**:\n"
+                        f"• A: 0–60% (< 61%) | B: 61–80% (< 81%)\n• C: 81–90% (< 91%) | D: 91–100% (≥ 91%)\n\n"
                         f"**Final Class Cutoffs**:\n"
                         f"• A: 4.00 to 3.25\n• B: 3.24 to 2.50\n• C: 2.49 to 1.75\n• D: < 1.75"
                     )
@@ -352,8 +355,8 @@ def run_streamlit():
                     uploaded_df,
                     sales_weight=w_sales,
                     hits_weight=w_hits,
-                    sales_cutoffs=(0.60, 0.80, 0.90),
-                    hits_cutoffs=(0.60, 0.80, 0.90),
+                    sales_cutoffs=(0.61, 0.81, 0.91),
+                    hits_cutoffs=(0.61, 0.81, 0.91),
                     score_cutoffs={"A": 3.25, "B": 2.50, "C": 1.75}
                 )
                 classified_df = class_res["df"]

@@ -1549,8 +1549,8 @@ def classify_inventory_multicriteria(
     df_input: Any,
     sales_weight: float = 0.65,
     hits_weight: float = 0.35,
-    sales_cutoffs: Tuple[float, float, float] = (0.60, 0.80, 0.90),
-    hits_cutoffs: Tuple[float, float, float] = (0.60, 0.80, 0.90),
+    sales_cutoffs: Tuple[float, float, float] = (0.61, 0.81, 0.91),
+    hits_cutoffs: Tuple[float, float, float] = (0.61, 0.81, 0.91),
     score_cutoffs: Optional[Dict[str, float]] = None
 ) -> Dict[str, Any]:
     """
@@ -1559,10 +1559,10 @@ def classify_inventory_multicriteria(
 
     Step 1 - Classify Sales and POS Hits separately:
       - Pareto cumulative thresholds:
-          Classification A: 0% to 60%
-          Classification B: 61% to 80%
-          Classification C: 81% to 90%
-          Classification D: 91% to 100%
+          Classification A: 0% to 60%  (cumulative share < 61%)
+          Classification B: 61% to 80% (cumulative share < 81%)
+          Classification C: 81% to 90% (cumulative share < 91%)
+          Classification D: 91% to 100% (cumulative share >= 91%)
       - Numerical score conversion: A = 4, B = 3, C = 2, D = 1.
 
     Step 2 - Calculate Combined Weighted Score:
@@ -1636,18 +1636,29 @@ def classify_inventory_multicriteria(
     # -------------------------------------------------------------------------
     def assign_class(cum_pct_series: pd.Series, cutoffs: Tuple[float, float, float]) -> pd.Series:
         classes = []
+        c0, c1, c2 = cutoffs
+        # Map discrete Pareto brackets:
+        # Bracket A: 0% to 60%  -> cumulative share < 61% (0.61)
+        # Bracket B: 61% to 80% -> cumulative share < 81% (0.81)
+        # Bracket C: 81% to 90% -> cumulative share < 91% (0.91)
+        # Bracket D: 91% to 100% -> cumulative share >= 91% (0.91)
+        # Handles both (0.61, 0.81, 0.91) and legacy (0.60, 0.80, 0.90) gracefully.
+        threshold_a = c0 if c0 > 0.60 else 0.61
+        threshold_b = c1 if c1 > 0.80 else 0.81
+        threshold_c = c2 if c2 > 0.90 else 0.91
+
         for idx, pct in enumerate(cum_pct_series):
             rounded_pct = round(float(pct), 6)
             if idx == 0:
                 # Top contributor is always Class A
                 classes.append("A")
-            elif rounded_pct <= cutoffs[0]:  # 0 to 60%
+            elif rounded_pct < threshold_a:  # 0 to 60.99% -> A
                 classes.append("A")
-            elif rounded_pct <= cutoffs[1]:  # 61 to 80%
+            elif rounded_pct < threshold_b:  # 61.00 to 80.99% -> B
                 classes.append("B")
-            elif rounded_pct <= cutoffs[2]:  # 81 to 90%
+            elif rounded_pct < threshold_c:  # 81.00 to 90.99% -> C
                 classes.append("C")
-            else:                            # 91 to 100%
+            else:                            # 91.00% to 100% -> D
                 classes.append("D")
         return pd.Series(classes, index=cum_pct_series.index)
 
