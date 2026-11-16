@@ -1669,7 +1669,8 @@ def classify_inventory_multicriteria(
         return pd.Series(classes, index=cum_pct_series.index)
 
     # 1A. Stratify by Sales ($)
-    df_sorted_sales = df.sort_values(by="_clean_sales", ascending=False).copy()
+    # Use deterministic secondary sort by Hits descending to consistently break any ties
+    df_sorted_sales = df.sort_values(by=["_clean_sales", "_clean_hits"], ascending=[False, False]).copy()
     if total_sales > 0:
         df_sorted_sales["Sales Share"] = (df_sorted_sales["_clean_sales"] / total_sales) * 100.0
         df_sorted_sales["Sales Cumulative Pct"] = (df_sorted_sales["_clean_sales"].cumsum() / total_sales) * 100.0
@@ -1682,7 +1683,8 @@ def classify_inventory_multicriteria(
     df["Sales Cumulative Pct"] = df_sorted_sales["Sales Cumulative Pct"].round(2)
 
     # 1B. Stratify by POS Hits
-    df_sorted_hits = df.sort_values(by="_clean_hits", ascending=False).copy()
+    # Use deterministic secondary sort by Sales ($) descending to consistently break any ties
+    df_sorted_hits = df.sort_values(by=["_clean_hits", "_clean_sales"], ascending=[False, False]).copy()
     if total_hits > 0:
         df_sorted_hits["Hits Share"] = (df_sorted_hits["_clean_hits"] / total_hits) * 100.0
         df_sorted_hits["Hits Cumulative Pct"] = (df_sorted_hits["_clean_hits"].cumsum() / total_hits) * 100.0
@@ -1807,24 +1809,6 @@ def classify_inventory_multicriteria(
         margins_name="Total"
     ).fillna(0.0)
     crosstab_sales = crosstab_sales.reindex(index=full_index, columns=full_index, fill_value=0.0)
-
-    return {
-        "df": df,
-        "total_skus": total_skus,
-        "total_sales": total_sales,
-        "total_hits": total_hits,
-        "avg_sales_per_sku": (total_sales / total_skus) if total_skus > 0 else 0.0,
-        "avg_hits_per_sku": (total_hits / total_skus) if total_skus > 0 else 0.0,
-        "class_summary": class_summary_df,
-        "crosstab_counts": crosstab_counts,
-        "crosstab_sales": crosstab_sales,
-        "weights": {"sales_weight": w_sales, "hits_weight": w_hits},
-        "cutoffs": {
-            "sales_cutoffs": sales_cutoffs,
-            "hits_cutoffs": hits_cutoffs,
-            "score_cutoffs": score_cutoffs
-        }
-    }
 
     return {
         "df": df,
