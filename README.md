@@ -52,11 +52,22 @@ Customer Question
 5. **Newsvendor Model (Single-Period Probabilistic)**
    - Determines critical fractile $CR = \frac{C_u}{C_u + C_o}$.
    - Computes optimal order quantity, expected lost sales, expected leftover inventory, and maximum expected net profit using standard normal loss functions.
-6. **Multi-Criteria Inventory Classification (A / B / C / D Analysis)**
-   - Performs dual-criterion Pareto stratification on uploaded CSV data using **Annual Sales ($)** and **Order Hits**.
-   - Computes cumulative contribution percentages (A: $\le 60\%$, B: $60-80\%$, C: $80-90\%$, D: $> 90\%$).
-   - Calculates weighted composite rank scores ($A=4, B=3, C=2, D=1$) with configurable or default $50/50$ weights.
-   - Assigns final composite classes ($A \ge 3.4, B \ge 2.8, C \ge 2.1, D < 2.1$) and generates 2D cross-classification matrices ($4 \times 4$ crosstabs) and managerial inventory policies.
+6. **Multi-Criteria Inventory Stratification (Sales & POS Hits Methodology)**
+   - **Step 1 — Separate Pareto Classification**: Ranks items independently on **Sales ($)** and **POS (Point-of-Sale) Hits** into Pareto classes:
+     - Class A: 0% to 60% cumulative share
+     - Class B: 61% to 80% cumulative share
+     - Class C: 81% to 90% cumulative share
+     - Class D: 91% to 100% cumulative share
+     - Converted to numerical scores: $A = 4, B = 3, C = 2, D = 1$.
+   - **Step 2 — Combined Weighted Score**: Weighted at 65% for Sales and 35% for POS Hits:
+     $$\text{Combined Weighted Score} = 0.65(\text{Sales Score}) + 0.35(\text{Hits Score})$$
+     *(e.g., Sales A [4] and POS Hits B [3] = $0.65(4) + 0.35(3) = 3.65$).*
+   - **Step 3 — Final Inventory Class Assignment**:
+     - Final Class A: Combined Weighted Score of **4.00 to 3.25**
+     - Final Class B: Combined Weighted Score of **3.24 to 2.50**
+     - Final Class C: Combined Weighted Score of **2.49 to 1.75**
+     - Final Class D: Combined Weighted Score of **less than 1.75**
+   - **Required Classification Summary**: Reports the number of items and summarizes total sales in each category (A, B, C, and D), alongside % of items, % of sales, POS hits, and 2D cross-classification matrices.
 
 ---
 

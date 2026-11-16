@@ -234,7 +234,7 @@ def run_streamlit():
 
         # Sample Datasets for Testing
         sample_classification_csv = (
-            "Item Number,Item Name,UoM,Sales ($),Hits\n"
+            "Item Number,Item Name,UoM,Sales ($),POS Hits\n"
             "#216,Industrial Motor 5HP,EA,4694447,186\n"
             "#149,Hydraulic Pump Unit,EA,4551669,55\n"
             "#191,Programmable Logic Controller,EA,4347291,317\n"
@@ -279,7 +279,7 @@ def run_streamlit():
             data=sample_classification_csv,
             file_name="sample_classification_inventory.csv",
             mime="text/csv",
-            help="Download a formatted sample CSV with Item Number, Item Name, UoM, Sales ($), and Hits to test Multi-Criteria Classification.",
+            help="Download a formatted sample CSV with Item Number, Item Name, UoM, Sales ($), and POS Hits to test Multi-Criteria Classification.",
             use_container_width=True
         )
         st.download_button(
@@ -301,25 +301,47 @@ def run_streamlit():
             missing_val_cols = validate_inventory_csv_columns(uploaded_df)
 
             # -----------------------------------------------------------------
-            # BRANCH 1: Multi-Criteria Inventory Classification (A / B / C / D)
+            # BRANCH 1: Multi-Criteria Inventory Stratification (Sales & POS Hits)
             # -----------------------------------------------------------------
             if not missing_class_cols:
-                st.header("🏷️ Multi-Criteria Inventory Classification (A / B / C / D Analysis)")
+                st.header("🏷️ Multicriteria Inventory Stratification (Sales & POS Hits)")
                 st.caption(
-                    "Deterministic Multi-Criteria Pareto Stratification using **Sales ($)** and **Order Hits** "
-                    "with Weighted Composite Scoring and 2D Cross-Classification Matrix."
+                    "Deterministic 3-Stage Multi-Criteria Stratification using **Sales ($)** and **POS Hits** | "
+                    "BAN 517 Supply Chain Analytics Methodology"
                 )
 
-                # Optional Interactive Weight & Sensitivity Controls
-                with st.expander("⚙️ Classification Parameters & Weighting Controls (Click to inspect / customize)", expanded=False):
+                # Methodology Step-by-Step Overview Callout
+                st.markdown("""
+                <div style="background-color: #f8f9fa; border-left: 5px solid #1a73e8; padding: 14px 18px; border-radius: 6px; margin-bottom: 16px; font-size: 0.93rem; color: #1f2937;">
+                    <div style="font-weight: 700; color: #1a73e8; margin-bottom: 6px; font-size: 1.0rem;">📚 Multicriteria Stratification Methodology</div>
+                    <ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
+                        <li><b>Step 1 — Classify Sales and POS Hits Separately</b>: Rank items independently using Pareto thresholds:
+                            <b>A</b> (0 to 60%), <b>B</b> (61 to 80%), <b>C</b> (81 to 90%), and <b>D</b> (91 to 100%).
+                            Convert each class to a numerical score: <b>A = 4, B = 3, C = 2, D = 1</b>.</li>
+                        <li><b>Step 2 — Calculate Combined Weighted Score</b>: Weighted at <b>65% for Sales</b> and <b>35% for POS Hits</b>:<br>
+                            <code>Combined Weighted Score = 0.65(Sales Score) + 0.35(Hits Score)</code><br>
+                            <i>Example: If Sales Class is A (4) and POS Hits Class is B (3), Combined Weighted Score = 0.65(4) + 0.35(3) = <b>3.65</b>.</i></li>
+                        <li><b>Step 3 — Assign Final Inventory Class</b>:
+                            <b>Class A</b>: 4.00 to 3.25 | <b>Class B</b>: 3.24 to 2.50 | <b>Class C</b>: 2.49 to 1.75 | <b>Class D</b>: less than 1.75.</li>
+                    </ul>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # Weighting Controls (Default: 65% Sales, 35% POS Hits)
+                with st.expander("⚙️ Stratification Parameters & Sensitivity Weighting Controls (Click to inspect / customize)", expanded=False):
                     w_col1, w_col2, w_col3 = st.columns([2, 2, 3])
-                    sales_weight_pct = w_col1.slider("Sales ($) Criteria Weight (%)", min_value=10, max_value=90, value=50, step=5)
+                    sales_weight_pct = w_col1.slider(
+                        "Sales ($) Criteria Weight (%)",
+                        min_value=10, max_value=90, value=65, step=5,
+                        help="Standard BAN 517 baseline is 65% for Sales ($)."
+                    )
                     hits_weight_pct = 100 - sales_weight_pct
-                    w_col2.metric("Hits Criteria Weight (%)", f"{hits_weight_pct}%")
+                    w_col2.metric("POS Hits Criteria Weight (%)", f"{hits_weight_pct}%")
                     w_col3.info(
                         f"**Current Scoring Formula**:\n"
-                        f"Composite Score = ({sales_weight_pct/100:.2f} × Sales Score) + ({hits_weight_pct/100:.2f} × Hits Score)\n\n"
-                        f"Cutoffs: A ≥ 3.40 | B ≥ 2.80 | C ≥ 2.10 | D < 2.10"
+                        f"Combined Weighted Score = ({sales_weight_pct/100:.2f} × Sales Score) + ({hits_weight_pct/100:.2f} × Hits Score)\n\n"
+                        f"**Final Class Cutoffs**:\n"
+                        f"• A: 4.00 to 3.25\n• B: 3.24 to 2.50\n• C: 2.49 to 1.75\n• D: < 1.75"
                     )
 
                 w_sales = sales_weight_pct / 100.0
@@ -329,7 +351,10 @@ def run_streamlit():
                 class_res = classify_inventory_multicriteria(
                     uploaded_df,
                     sales_weight=w_sales,
-                    hits_weight=w_hits
+                    hits_weight=w_hits,
+                    sales_cutoffs=(0.60, 0.80, 0.90),
+                    hits_cutoffs=(0.60, 0.80, 0.90),
+                    score_cutoffs={"A": 3.25, "B": 2.50, "C": 1.75}
                 )
                 classified_df = class_res["df"]
                 class_summary = class_res["class_summary"]
@@ -337,49 +362,68 @@ def run_streamlit():
                 # Dataset Overview Metrics
                 st.subheader("Dataset Dimensions & Summary")
                 d1, d2, d3, d4 = st.columns(4)
-                d1.metric("Total Classified SKUs", f"{class_res['total_skus']:,}")
-                d2.metric("Total Annual Sales", f"${class_res['total_sales']:,.2f}")
-                d3.metric("Total Order Hits", f"{class_res['total_hits']:,}")
-                d4.metric("Avg Annual Sales / SKU", f"${class_res['avg_sales_per_sku']:,.2f}")
+                d1.metric("Total Classified Items", f"{class_res['total_skus']:,}")
+                d2.metric("Total Catalog Sales", f"${class_res['total_sales']:,.2f}")
+                d3.metric("Total POS Hits", f"{class_res['total_hits']:,}")
+                d4.metric("Avg Annual Sales / Item", f"${class_res['avg_sales_per_sku']:,.2f}")
 
                 st.write("")
 
-                # Class Breakdown KPI Cards
-                st.subheader("Classification Distribution by Class")
+                # -------------------------------------------------------------
+                # REQUIRED CLASSIFICATION SUMMARY
+                # -------------------------------------------------------------
+                st.subheader("📋 Required Classification Summary")
+                st.caption(
+                    "Reporting the number of items in each final category (A, B, C, and D) "
+                    "and summarizing total Sales for all items in each category."
+                )
+
+                # 4 KPI Cards for Categories A, B, C, D
                 kpi_a, kpi_b, kpi_c, kpi_d = st.columns(4)
                 cards_meta = [
-                    (kpi_a, "Class A (Strategic)", "#1b5e20", "#e8f5e9"),
-                    (kpi_b, "Class B (Moderate)", "#0d47a1", "#e3f2fd"),
-                    (kpi_c, "Class C (Low Velocity)", "#e65100", "#fff3e0"),
-                    (kpi_d, "Class D (Slow / Dead)", "#b71c1c", "#ffebee")
+                    (kpi_a, "Final Category A", "#1b5e20", "#e8f5e9", "4.00 to 3.25"),
+                    (kpi_b, "Final Category B", "#0d47a1", "#e3f2fd", "3.24 to 2.50"),
+                    (kpi_c, "Final Category C", "#e65100", "#fff3e0", "2.49 to 1.75"),
+                    (kpi_d, "Final Category D", "#b71c1c", "#ffebee", "< 1.75")
                 ]
-                for (col, label, border_c, bg_c), (_, row_data) in zip(cards_meta, class_summary.iterrows()):
+                for (col, label, border_c, bg_c, score_range), (_, row_data) in zip(cards_meta, class_summary.iterrows()):
                     with col:
                         st.markdown(
-                            f"""<div style="background-color: {bg_c}; border-top: 4px solid {border_c}; padding: 12px 14px; border-radius: 8px; margin-bottom: 8px;">
+                            f"""<div style="background-color: {bg_c}; border-top: 4px solid {border_c}; padding: 14px 16px; border-radius: 8px; margin-bottom: 8px;">
                                 <div style="font-size: 0.8rem; font-weight: 700; color: {border_c}; text-transform: uppercase;">{label}</div>
-                                <div style="font-size: 1.25rem; font-weight: 800; color: #212529; margin-top: 4px;">{int(row_data['SKU Count']):,} SKUs <span style="font-size: 0.85rem; font-weight: 500; color: #495057;">({row_data['% of SKUs']:.1f}%)</span></div>
-                                <div style="font-size: 0.95rem; font-weight: 700; color: #1f2937; margin-top: 6px;">Sales: ${row_data['Total Sales ($)']:,.0f} <span style="font-size: 0.8rem; font-weight: normal; color: #6c757d;">({row_data['% of Sales']:.1f}%)</span></div>
-                                <div style="font-size: 0.85rem; color: #495057;">Hits: {int(row_data['Total Hits']):,} <span style="font-size: 0.8rem; color: #6c757d;">({row_data['% of Hits']:.1f}%)</span></div>
+                                <div style="font-size: 0.75rem; color: #6c757d; margin-top: 2px;">Score: {score_range}</div>
+                                <div style="font-size: 1.35rem; font-weight: 800; color: #212529; margin-top: 6px;">{int(row_data['Number of Items']):,} Items <span style="font-size: 0.85rem; font-weight: 500; color: #495057;">({row_data['% of Total Items']:.1f}%)</span></div>
+                                <div style="font-size: 1.05rem; font-weight: 700; color: #1f2937; margin-top: 6px;">Total Sales: ${row_data['Total Sales ($)']:,.2f} <span style="font-size: 0.8rem; font-weight: normal; color: #6c757d;">({row_data['% of Total Sales']:.1f}%)</span></div>
+                                <div style="font-size: 0.85rem; color: #495057; margin-top: 4px;">POS Hits: {int(row_data['Total POS Hits']):,} <span style="font-size: 0.8rem; color: #6c757d;">({row_data['% of POS Hits']:.1f}%)</span></div>
                             </div>""",
                             unsafe_allow_html=True
                         )
 
                 st.write("")
 
-                # Distribution Summary Table with Policies
-                st.subheader("Class Summary & Strategic Inventory Policies")
+                # Required Summary Data Table
                 st.dataframe(
-                    class_summary,
+                    class_summary[[
+                        "Category (Class)",
+                        "Number of Items",
+                        "% of Total Items",
+                        "Total Sales ($)",
+                        "% of Total Sales",
+                        "Total POS Hits",
+                        "% of POS Hits",
+                        "Combined Score Range",
+                        "Recommended Inventory Policy"
+                    ]],
                     column_config={
-                        "Class": st.column_config.TextColumn("Class", width="small"),
-                        "SKU Count": st.column_config.NumberColumn("SKU Count", format="%d"),
-                        "% of SKUs": st.column_config.NumberColumn("% of SKUs", format="%.1f%%"),
+                        "Category (Class)": st.column_config.TextColumn("Final Category", width="small"),
+                        "Number of Items": st.column_config.NumberColumn("Number of Items", format="%d"),
+                        "% of Total Items": st.column_config.NumberColumn("% of Total Items", format="%.1f%%"),
                         "Total Sales ($)": st.column_config.NumberColumn("Total Sales ($)", format="$%,.2f"),
-                        "% of Sales": st.column_config.NumberColumn("% of Sales", format="%.1f%%"),
-                        "Total Hits": st.column_config.NumberColumn("Total Hits", format="%d"),
-                        "% of Hits": st.column_config.NumberColumn("% of Hits", format="%.1f%%"),
-                        "Recommended Inventory Policy": st.column_config.TextColumn("Recommended Inventory Management Policy", width="large")
+                        "% of Total Sales": st.column_config.NumberColumn("% of Total Sales", format="%.1f%%"),
+                        "Total POS Hits": st.column_config.NumberColumn("Total POS Hits", format="%d"),
+                        "% of POS Hits": st.column_config.NumberColumn("% of POS Hits", format="%.1f%%"),
+                        "Combined Score Range": st.column_config.TextColumn("Score Range", width="small"),
+                        "Recommended Inventory Policy": st.column_config.TextColumn("Strategic Inventory Policy", width="large")
                     },
                     hide_index=True,
                     use_container_width=True
@@ -388,15 +432,15 @@ def run_streamlit():
                 st.write("")
 
                 # 2D Cross-Classification Matrix
-                st.subheader("2D Cross-Classification Matrix (Sales Class × Hits Class)")
-                st.caption("Rows represent Sales ($) Pareto Class; Columns represent Order Hits Pareto Class.")
+                st.subheader("2D Cross-Classification Matrix (Sales Class × POS Hits Class)")
+                st.caption("Rows represent Sales ($) Pareto Class (0-60% A, 61-80% B, 81-90% C, 91-100% D); Columns represent POS Hits Pareto Class.")
 
                 crosstab_view = st.radio(
                     "Select Cross-Tabulation Metric:",
-                    ["SKU Count (Number of Items)", "Total Sales ($)"],
+                    ["Number of Items (SKU Count)", "Total Sales ($)"],
                     horizontal=True
                 )
-                if "SKU Count" in crosstab_view:
+                if "Number of Items" in crosstab_view:
                     st.dataframe(class_res["crosstab_counts"], use_container_width=True)
                 else:
                     st.dataframe(
@@ -410,7 +454,10 @@ def run_streamlit():
                 st.subheader("Classified Inventory Master DataFrame")
                 col_dl1, col_dl2 = st.columns([3, 1])
                 with col_dl1:
-                    st.caption(f"Showing all {len(classified_df)} items with individual Sales/Hits ranks, weighted composite score, and final class.")
+                    st.caption(
+                        f"Showing all {len(classified_df)} items with individual Sales/POS Hits Pareto classes, "
+                        f"individual scores, Combined Weighted Score, and Final Inventory Class."
+                    )
                 with col_dl2:
                     csv_export = classified_df.to_csv(index=False)
                     st.download_button(
@@ -422,14 +469,30 @@ def run_streamlit():
                     )
 
                 st.dataframe(
-                    classified_df,
+                    classified_df[[
+                        "Item Number",
+                        "Item Name",
+                        "UoM",
+                        "Sales ($)",
+                        "POS Hits",
+                        "Sales Cumulative Pct",
+                        "Sales Class",
+                        "Sales Score",
+                        "POS Hits Cumulative Pct",
+                        "POS Hits Class",
+                        "POS Hits Score",
+                        "Combined Weighted Score",
+                        "Final Inventory Class"
+                    ]],
                     column_config={
                         "Sales ($)": st.column_config.NumberColumn("Sales ($)", format="$%,.2f"),
-                        "Hits": st.column_config.NumberColumn("Hits", format="%d"),
+                        "POS Hits": st.column_config.NumberColumn("POS Hits", format="%d"),
                         "Sales Cumulative Pct": st.column_config.NumberColumn("Sales Cum %", format="%.2f%%"),
-                        "Hits Cumulative Pct": st.column_config.NumberColumn("Hits Cum %", format="%.2f%%"),
-                        "Weighted Score": st.column_config.NumberColumn("Weighted Score", format="%.2f"),
-                        "Final Class": st.column_config.TextColumn("Final Class")
+                        "Sales Score": st.column_config.NumberColumn("Sales Score", format="%.0f"),
+                        "POS Hits Cumulative Pct": st.column_config.NumberColumn("POS Hits Cum %", format="%.2f%%"),
+                        "POS Hits Score": st.column_config.NumberColumn("POS Hits Score", format="%.0f"),
+                        "Combined Weighted Score": st.column_config.NumberColumn("Combined Weighted Score", format="%.2f"),
+                        "Final Inventory Class": st.column_config.TextColumn("Final Inventory Class")
                     },
                     use_container_width=True
                 )
