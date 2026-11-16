@@ -600,29 +600,48 @@ def run_streamlit():
     # TAB 1: Natural Language Decision Agent
     # -------------------------------------------------------------------------
     with tab_agent:
-        st.subheader("1. Ask an Inventory Decision Question")
+        st.subheader("Ask an Inventory Decision Question")
         st.write("Select a textbook benchmark scenario or enter your own business problem:")
 
-        # Initialize session state variables for query and response
+        # Preset button short labels to prevent truncation
+        PRESET_LABELS = {
+            "1. Economic Order Quantity (EOQ)": "EOQ (Basic)",
+            "2. Quantity Discount": "Quantity Discount",
+            "3. Safety Stock & Reorder Point": "Safety Stock & Reorder Point",
+            "4. Fixed-Period Review": "Fixed-Period Review",
+            "5. Newsvendor (Single-Period)": "Newsvendor (Single-Period)"
+        }
+
+        # Initialize session state variables for active preset, query, and response
+        if "active_preset" not in st.session_state:
+            st.session_state.active_preset = "1. Economic Order Quantity (EOQ)"
         if "nl_query_box" not in st.session_state:
             st.session_state.nl_query_box = SAMPLE_QUERIES["1. Economic Order Quantity (EOQ)"]
         if "agent_response" not in st.session_state:
             st.session_state.agent_response = None
 
-        def on_sample_button_clicked(query_text: str):
+        def on_sample_button_clicked(preset_key: str, query_text: str):
+            st.session_state.active_preset = preset_key
             st.session_state.nl_query_box = query_text
             st.session_state.agent_response = None  # Reset prior results until Analyze & Decide is clicked
 
-        # 1-Click Example Buttons
-        cols = st.columns(len(SAMPLE_QUERIES))
+        # If user manually modified query box away from the preset text, un-highlight preset
+        if st.session_state.get("active_preset") and st.session_state.get("nl_query_box") != SAMPLE_QUERIES.get(st.session_state.active_preset):
+            st.session_state.active_preset = None
+
+        # 1-Click Example Buttons with balanced column width ratios
+        cols = st.columns([1.0, 1.1, 1.4, 1.1, 1.3])
         for i, (label, sample_text) in enumerate(SAMPLE_QUERIES.items()):
-            short_name = label.split(". ")[1]
+            btn_label = PRESET_LABELS.get(label, label.split(". ")[-1])
+            is_active = (st.session_state.get("active_preset") == label)
+            btn_type = "primary" if is_active else "secondary"
             cols[i].button(
-                short_name,
+                btn_label,
+                type=btn_type,
                 use_container_width=True,
                 key=f"sample_btn_{i}",
                 on_click=on_sample_button_clicked,
-                args=(sample_text,)
+                args=(label, sample_text)
             )
 
         user_query = st.text_area(
@@ -683,7 +702,7 @@ def run_streamlit():
                 st.write("")
 
                 # KPI Metrics Cards
-                st.subheader("3. Core Analytical Results")
+                st.subheader("Core Analytical Results")
                 res = response.calculation_result
                 m_type = response.model_type
 
@@ -788,7 +807,7 @@ def run_streamlit():
                         st.markdown(render_metric_card("In-Stock Probability", f"{res['in_stock_probability']:.1%}"), unsafe_allow_html=True)
 
                 # Verification & Sanity Checks
-                st.subheader("4. Automated Mathematical & Operational Verification")
+                st.subheader("Automated Mathematical & Operational Verification")
                 for check in response.verification_checks:
                     if check.status == "PASS":
                         st.success(f"**{check.name} [PASSED]**: {check.message}")
@@ -799,7 +818,7 @@ def run_streamlit():
 
                 # Visual Charts
                 if response.visualization_data:
-                    st.subheader("5. Visual Optimization Curves")
+                    st.subheader("Visual Optimization Curves")
                     vtype = response.visualization_data["type"]
                     vdata = response.visualization_data["data"]
 
@@ -833,7 +852,7 @@ def run_streamlit():
 
                 # Dedicated 8-Part Student Verification Breakdown for BAN 517
                 if "inputs_extracted" in res or "intermediate_calculations" in res:
-                    st.subheader("6. 🎓 Student Verification Breakdown (8 Mandatory Sections)")
+                    st.subheader("🎓 Student Verification Breakdown (8 Mandatory Sections)")
                     with st.expander("Click to expand/collapse interactive 8-Point Academic Verification tabs", expanded=True):
                         v_tab1, v_tab2, v_tab3, v_tab4 = st.tabs([
                             "1 & 2: Inputs & Definitions",
@@ -883,7 +902,7 @@ def run_streamlit():
                                 st.markdown(f"{i}. {a}")
 
                 # Detailed Explanation & KaTeX derivation
-                st.subheader("7. Analytical Derivation & Managerial Insights")
+                st.subheader("Analytical Derivation & Managerial Insights")
                 st.markdown(response.detailed_explanation)
 
     # -------------------------------------------------------------------------
