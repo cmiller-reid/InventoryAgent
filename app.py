@@ -313,19 +313,32 @@ def run_streamlit():
         st.subheader("1. Ask an Inventory Decision Question")
         st.write("Select a textbook benchmark scenario or enter your own business problem:")
 
+        # Initialize session state variables for query, response, and auto-analysis
+        if "nl_query_box" not in st.session_state:
+            st.session_state.nl_query_box = SAMPLE_QUERIES["1. Economic Order Quantity (EOQ)"]
+        if "agent_response" not in st.session_state:
+            st.session_state.agent_response = None
+        if "auto_analyze" not in st.session_state:
+            st.session_state.auto_analyze = False
+
+        def on_sample_button_clicked(query_text: str):
+            st.session_state.nl_query_box = query_text
+            st.session_state.auto_analyze = True
+
         # 1-Click Example Buttons
         cols = st.columns(len(SAMPLE_QUERIES))
-        selected_sample = None
         for i, (label, sample_text) in enumerate(SAMPLE_QUERIES.items()):
             short_name = label.split(". ")[1]
-            if cols[i].button(short_name, use_container_width=True):
-                selected_sample = sample_text
-
-        default_query = selected_sample if selected_sample else SAMPLE_QUERIES["1. Economic Order Quantity (EOQ)"]
+            cols[i].button(
+                short_name,
+                use_container_width=True,
+                key=f"sample_btn_{i}",
+                on_click=on_sample_button_clicked,
+                args=(sample_text,)
+            )
 
         user_query = st.text_area(
             "Natural Language Inventory Question:",
-            value=default_query,
             height=95,
             key="nl_query_box"
         )
@@ -333,11 +346,16 @@ def run_streamlit():
         col_btn, col_info = st.columns([1, 4])
         execute_click = col_btn.button("🚀 Analyze & Decide", type="primary", use_container_width=True)
 
-        # Run Analysis
-        if execute_click or selected_sample:
+        # Run Analysis when "Analyze & Decide" is clicked or when a sample button is clicked
+        if execute_click or st.session_state.auto_analyze:
+            st.session_state.auto_analyze = False  # Reset auto-run flag
             with st.spinner("Executing 7-stage inventory decision pipeline..."):
-                response: AgentResponse = st.session_state.agent.process_query(user_query)
+                st.session_state.agent_response = st.session_state.agent.process_query(user_query)
 
+        response = st.session_state.agent_response
+
+        # Display Results if a response is available
+        if response is not None:
             st.divider()
 
             # Display Status & Model Header
