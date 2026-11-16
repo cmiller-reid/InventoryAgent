@@ -313,17 +313,15 @@ def run_streamlit():
         st.subheader("1. Ask an Inventory Decision Question")
         st.write("Select a textbook benchmark scenario or enter your own business problem:")
 
-        # Initialize session state variables for query, response, and auto-analysis
+        # Initialize session state variables for query and response
         if "nl_query_box" not in st.session_state:
             st.session_state.nl_query_box = SAMPLE_QUERIES["1. Economic Order Quantity (EOQ)"]
         if "agent_response" not in st.session_state:
             st.session_state.agent_response = None
-        if "auto_analyze" not in st.session_state:
-            st.session_state.auto_analyze = False
 
         def on_sample_button_clicked(query_text: str):
             st.session_state.nl_query_box = query_text
-            st.session_state.auto_analyze = True
+            st.session_state.agent_response = None  # Reset prior results until Analyze & Decide is clicked
 
         # 1-Click Example Buttons
         cols = st.columns(len(SAMPLE_QUERIES))
@@ -346,9 +344,8 @@ def run_streamlit():
         col_btn, col_info = st.columns([1, 4])
         execute_click = col_btn.button("🚀 Analyze & Decide", type="primary", use_container_width=True)
 
-        # Run Analysis when "Analyze & Decide" is clicked or when a sample button is clicked
-        if execute_click or st.session_state.auto_analyze:
-            st.session_state.auto_analyze = False  # Reset auto-run flag
+        # Run Analysis ONLY when "Analyze & Decide" is clicked
+        if execute_click:
             with st.spinner("Executing 7-stage inventory decision pipeline..."):
                 st.session_state.agent_response = st.session_state.agent.process_query(user_query)
 
