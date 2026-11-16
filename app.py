@@ -165,6 +165,34 @@ def render_metric_card(label: str, value: str, subtext: Optional[str] = None) ->
     )
 
 
+def render_managerial_card(insights_text: str) -> str:
+    """
+    Renders strategic managerial insights inside a clean, light-tinted callout card:
+    background-color: #f8fafc; border-left: 4px solid #0284c7; padding: 16px 20px; border-radius: 8px;
+    """
+    lines = [line.strip() for line in insights_text.strip().split("\n") if line.strip()]
+    html_items = []
+    for line in lines:
+        if line.startswith("- ") or line.startswith("* "):
+            content = line[2:].strip()
+            content = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", content)
+            content = content.replace(r"\$", "$")
+            html_items.append(f"<li style='margin-bottom: 8px;'>{content}</li>")
+        else:
+            content = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", line)
+            content = content.replace(r"\$", "$")
+            html_items.append(f"<p style='margin-bottom: 8px; margin-top: 0;'>{content}</p>")
+
+    if any(item.startswith("<li") for item in html_items):
+        inner_content = f"<ul style='margin: 0; padding-left: 20px; line-height: 1.6; color: #1e293b; font-size: 0.95rem;'>\n" + "\n".join(html_items) + "\n</ul>"
+    else:
+        inner_content = "\n".join(html_items)
+
+    return f"""<div style="background-color: #f8fafc; border-left: 4px solid #0284c7; padding: 16px 20px; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
+{inner_content}
+</div>"""
+
+
 # =============================================================================
 # Streamlit Web UI Mode
 # =============================================================================
@@ -838,14 +866,13 @@ def run_streamlit():
                         ).interactive()
                         st.altair_chart(chart, use_container_width=True)
 
-                # Analytical Derivation & Managerial Insights (rendered immediately after Visual Optimization Curves)
-                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
-                st.subheader("Analytical Derivation & Managerial Insights")
-                # Strip out any appended duplicate 8-section scrolling list, keeping the derivation, equations, and cadence
-                clean_explanation = response.detailed_explanation.split("### 🎓 Student Verification Breakdown")[0].rstrip("-\n ")
-                st.markdown(clean_explanation)
+                # Managerial Insights Callout Card (rendered directly beneath Visual Optimization Curves)
+                if getattr(response, "managerial_insights", None):
+                    st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                    st.subheader("Managerial Insights")
+                    st.markdown(render_managerial_card(response.managerial_insights), unsafe_allow_html=True)
 
-                # Verification & Sanity Checks (rendered after Analytical Derivation)
+                # Automated Mathematical & Operational Verification
                 st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
                 st.subheader("Automated Mathematical & Operational Verification")
                 for check in response.verification_checks:
@@ -855,6 +882,13 @@ def run_streamlit():
                         st.warning(f"**{check.name} [CAUTION]**: {check.message}")
                     else:
                         st.error(f"**{check.name} [FAILED]**: {check.message}")
+
+                # Step-by-Step Mathematical Derivation (expandable right above Student Verification Breakdown)
+                clean_derivation = response.detailed_explanation.split("### 🎓 Student Verification Breakdown")[0].rstrip("-\n ")
+                if clean_derivation:
+                    st.markdown("<div style='margin-top: 20px;'></div>", unsafe_allow_html=True)
+                    with st.expander("View Step-by-Step Mathematical Derivation", expanded=False):
+                        st.markdown(clean_derivation)
 
                 # Dedicated 8-Part Student Verification Breakdown for BAN 517 (Interactive tabbed version)
                 if "inputs_extracted" in res or "intermediate_calculations" in res:

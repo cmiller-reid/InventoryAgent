@@ -90,6 +90,7 @@ class AgentResponse:
     detailed_explanation: str
     step_traces: List[AgentStepTrace]
     visualization_data: Optional[Dict[str, Any]] = None
+    managerial_insights: str = ""
     success: bool = True
     error_message: Optional[str] = None
 
@@ -109,6 +110,7 @@ class AgentResponse:
             ],
             "executive_recommendation": self.executive_recommendation,
             "detailed_explanation": self.detailed_explanation,
+            "managerial_insights": self.managerial_insights,
             "step_traces": [
                 {
                     "step_number": s.step_number,
@@ -902,12 +904,13 @@ class InventoryDecisionAgent:
         inputs: Dict[str, Any],
         calc_result: Dict[str, Any],
         verification_checks: List[VerificationCheck]
-    ) -> Tuple[str, str, Optional[Dict[str, Any]]]:
+    ) -> Tuple[str, str, Optional[Dict[str, Any]], str]:
         """
         Generates executive recommendation, detailed mathematical explanations,
-        and visual curve data.
+        visual curve data, and strategic managerial insights.
         """
         vis_data = None
+        insights = ""
 
         if model_type == InventoryModelType.EOQ:
             eoq = calc_result["eoq"]
@@ -933,28 +936,42 @@ class InventoryDecisionAgent:
                 f"This minimizes total annual inventory holding and setup costs to **${tot_cost:,.2f}**."
             )
 
+            purchase_lines = ""
+            if calc_result.get("total_annual_cost"):
+                purchase_lines = (
+                    f"\n   - **Annual Purchase Cost**: **${calc_result['annual_purchase_cost']:,.2f}**"
+                    f"\n   - **Total Cost (Inventory + Goods)**: **${calc_result['total_annual_cost']:,.2f}**"
+                )
+
             exp = f"""### Analytical Step-by-Step Breakdown
 
 1. **Economic Order Quantity Formula**:
    $$\\text{{EOQ}} = \\sqrt{{\\frac{{2 \\cdot D \\cdot S}}{{H}}}}$$
    - Annual Demand ($D$) = **{inputs['demand']:,}** units
-   - Ordering / Setup Cost ($S$) = **${inputs['ordering_cost']:,.2f}** per order
-   - Annual Holding Cost ($H$) = **${inputs['holding_cost']:,.2f}** per unit/year
+   - Ordering / Setup Cost ($S$) = **\\${inputs['ordering_cost']:,.2f}** per order
+   - Annual Holding Cost ($H$) = **\\${inputs['holding_cost']:,.2f}** per unit/year
    
 2. **Calculation**:
    $$\\text{{EOQ}} = \\sqrt{{\\frac{{2 \\cdot {inputs['demand']:,} \\cdot {inputs['ordering_cost']}}}{{{inputs['holding_cost']}}}}} = \\sqrt{{{2 * inputs['demand'] * inputs['ordering_cost'] / inputs['holding_cost']:,.2f}}} = \\mathbf{{{eoq:,.2f}}} \\text{{ units}}$$
    - Practical Rounded Order Batch: **{eoq_rnd:,} units**
 
 3. **Annual Cost Breakdown**:
-   - **Annual Ordering Cost**: $\\frac{{D}}{{Q}} \\cdot S = \\frac{{{inputs['demand']:,}}}{{{eoq:,.2f}}} \\cdot {inputs['ordering_cost']} = \\mathbf{{\\${calc_result['annual_ordering_cost']:,.2f}}}$
-   - **Annual Holding Cost**: $\\frac{{Q}}{{2}} \\cdot H = \\frac{{{eoq:,.2f}}}{{2}} \\cdot {inputs['holding_cost']} = \\mathbf{{\\${calc_result['annual_holding_cost']:,.2f}}}$
-   - **Total Annual Inventory Cost**: **${tot_cost:,.2f}**
-   {f"- **Annual Purchase Cost**: ${calc_result['annual_purchase_cost']:,.2f}\\n   - **Total Cost (Inventory + Goods)**: **${calc_result['total_annual_cost']:,.2f}**" if calc_result.get('total_annual_cost') else ""}
+   - **Annual Ordering Cost**: $\\frac{{D}}{{Q}} \\cdot S = \\frac{{{inputs['demand']:,}}}{{{eoq:,.2f}}} \\cdot {inputs['ordering_cost']} =$ **${calc_result['annual_ordering_cost']:,.2f}**
+   - **Annual Holding Cost**: $\\frac{{Q}}{{2}} \\cdot H = \\frac{{{eoq:,.2f}}}{{2}} \\cdot {inputs['holding_cost']} =$ **${calc_result['annual_holding_cost']:,.2f}**
+   - **Total Annual Inventory Cost**: **${tot_cost:,.2f}**{purchase_lines}
 
 4. **Operational Cadence**:
    - **Order Frequency**: {orders_yr:.2f} orders per year.
    - **Cycle Time**: {cycle_days:.1f} operating days between replenishments.
 """
+
+            insights = (
+                f"- **Ordering Cadence & Cycle Time**: Place orders every **{cycle_days:.1f} work days** "
+                f"(~**{orders_yr:.1f} orders/year**) in batch sizes of **{eoq_rnd:,} units** to maintain an optimal balance between order setup effort and inventory holding cost.\n"
+                f"- **Cost Parity Trade-off**: At the optimal EOQ ({eoq_rnd:,} units), annual ordering cost (${calc_result['annual_ordering_cost']:,.2f}) "
+                f"balances annual holding cost (${calc_result['annual_holding_cost']:,.2f}), minimizing total annual inventory holding and setup costs to **${tot_cost:,.2f}**.\n"
+                f"- **Batching Robustness**: The total cost curve is relatively flat around the minimum. Modest rounding to match vendor packaging near **{eoq_rnd:,} units** incurs negligible cost impact."
+            )
 
         elif model_type == InventoryModelType.QUANTITY_DISCOUNT:
             opt_tier = calc_result["optimal_tier_index"]
@@ -977,14 +994,15 @@ class InventoryDecisionAgent:
                 feas_str = "Yes" if t["is_raw_eoq_feasible"] else "No (Use Cutoff)"
                 rows.append(
                     f"| Tier {t['tier_index']} | {t['min_quantity']:,.0f} - {max_str} | "
-                    f"${t['unit_price']:.2f} | {t['raw_eoq']:,.1f} | {feas_str} | "
-                    f"{t['candidate_quantity']:,.0f} | ${t['total_annual_cost']:,.2f} |"
+                    f"\\${t['unit_price']:.2f} | {t['raw_eoq']:,.1f} | {feas_str} | "
+                    f"{t['candidate_quantity']:,.0f} | \\${t['total_annual_cost']:,.2f} |"
                 )
             tier_rows = "\n".join(rows)
 
             exp = f"""### Analytical Step-by-Step Breakdown
 
 1. **Discount Tier Evaluation Matrix**:
+
 | Tier | Quantity Range | Unit Price | Unconstrained EOQ | Feasible? | Candidate Order Q | Total Annual Cost |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 {tier_rows}
@@ -994,6 +1012,13 @@ class InventoryDecisionAgent:
    - If $EOQ_i$ falls below the discount threshold, ordering exactly the minimum threshold quantity yields the lowest cost in that bracket.
    - Evaluating total annual costs (Purchase + Ordering + Holding) confirms **Tier {opt_tier}** with **{opt_q:,.0f} units** minimizes global total cost.
 """
+
+            insights = (
+                f"- **Optimal Price-Break Selection**: Order in **Tier {opt_tier}** batches of **{opt_q:,.0f} units** at **${opt_price:,.2f}/unit**, "
+                f"delivering **${savings:,.2f} ({savings_pct:.1f}%)** in net annual savings compared to the baseline pricing tier.\n"
+                f"- **Holding Cost vs. Price Savings**: The significant purchase discount outweighs the higher inventory holding cost incurred by holding larger lot sizes beyond the unconstrained EOQ.\n"
+                f"- **Working Capital & Storage Feasibility**: Verify that warehouse floor capacity and working capital liquidity can accommodate a peak inventory of up to **{opt_q:,.0f} units** before committing to this volume tier."
+            )
 
         elif model_type == InventoryModelType.SAFETY_STOCK_ROP:
             ss = calc_result["safety_stock"]
@@ -1030,6 +1055,13 @@ class InventoryDecisionAgent:
    - **Cycle Stockout Risk**: **{calc_result['stockout_risk_per_cycle']*100:.2f}%** per replenishment cycle.
 """
 
+            insights = (
+                f"- **Buffer Protection & Service Assurance**: Maintaining a safety stock buffer of **{ss_rnd:,} units** protects operations against demand and lead-time variability, "
+                f"achieving the target **{csl*100:.1f}% Cycle Service Level**.\n"
+                f"- **Automated Reorder Trigger**: Place a replenishment order immediately when on-hand plus on-order inventory drops to the Reorder Point of **{rop_rnd:,} units** to prevent stockouts during replenishment lead time.\n"
+                f"- **Lead-Time Uncertainty Mitigation**: Replenishment stockout risk is bounded at **{calc_result['stockout_risk_per_cycle']*100:.2f}%** per cycle. Partnering with suppliers to shorten lead time (L = {inputs['lead_time']} periods) or reduce lead time variance directly lowers required safety stock investment."
+            )
+
         elif model_type == InventoryModelType.FIXED_PERIOD_REVIEW:
             p = calc_result["review_period"]
             lt = calc_result["lead_time"]
@@ -1063,6 +1095,12 @@ class InventoryDecisionAgent:
    - **Order Quantity ($Q$)**: $\\max(0, M - \\text{{Position}}) = {target_inv} - {net_pos:,.0f} = \\mathbf{{{rec_q:,}}} \\text{{ units}}$
 """
 
+            insights = (
+                f"- **Periodic Review Cadence**: Reviewing inventory every **{p:.0f} periods** aligns orders with supplier delivery schedules, enabling consolidated shipments and lower freight handling charges.\n"
+                f"- **Protection Horizon Risk Coverage**: Because replenishments only occur periodically, safety stock of **{ss:,} units** shields operations against demand volatility across the full **{prot_int:.1f}-period** protection interval (Review Period {p:.0f} + Lead Time {lt:.0f}).\n"
+                f"- **Immediate Replenishment Action**: Raise a purchase order for **{rec_q:,} units** today to bring the current inventory position ({net_pos:,.0f} units) up to the target order-up-to level of **{target_inv:,} units**."
+            )
+
         elif model_type == InventoryModelType.NEWSVENDOR:
             q_opt = calc_result["optimal_order_quantity"]
             q_opt_rnd = calc_result["optimal_order_quantity_rounded"]
@@ -1095,11 +1133,11 @@ class InventoryDecisionAgent:
             exp = f"""### Analytical Step-by-Step Breakdown
 
 1. **Underage & Overage Economic Analysis**:
-   - Selling Price ($p$) = **${inputs['selling_price']:,.2f}**
-   - Purchase / Production Cost ($c$) = **${inputs['purchase_cost']:,.2f}**
-   - Salvage Value ($s$) = **${inputs.get('salvage_value', 0):,.2f}**
-   - **Cost of Underage ($C_u$)**: $p - c = \\mathbf{{\\${cu:,.2f}}}$ (Profit margin lost per unmet unit)
-   - **Cost of Overage ($C_o$)**: $c - s = \\mathbf{{\\${co:,.2f}}}$ (Loss incurred per unsold unit)
+   - Selling Price ($p$) = **\\${inputs['selling_price']:,.2f}**
+   - Purchase / Production Cost ($c$) = **\\${inputs['purchase_cost']:,.2f}**
+   - Salvage Value ($s$) = **\\${inputs.get('salvage_value', 0):,.2f}**
+   - **Cost of Underage ($C_u$)**: $p - c =$ **\\${cu:,.2f}** (Profit margin lost per unmet unit)
+   - **Cost of Overage ($C_o$)**: $c - s =$ **\\${co:,.2f}** (Loss incurred per unsold unit)
 
 2. **Critical Fractile & Optimal Order Quantity**:
    $$\\text{{Critical Fractile (CR)}} = \\frac{{C_u}}{{C_u + C_o}} = \\frac{{{cu:,.2f}}}{{{cu:,.2f} + {co:,.2f}}} = \\mathbf{{{cr:.4f}}} \\; ({cr*100:.2f}\\%)$$
@@ -1111,19 +1149,27 @@ class InventoryDecisionAgent:
    - **Expected Sales**: {calc_result['expected_sales']:,.1f} units
    - **Expected Lost Sales**: {lost:,.1f} units
    - **Expected Leftover Inventory**: {leftover:,.1f} units
-   - **Expected Gross Revenue**: ${calc_result['expected_revenue']:,.2f}
-   - **Expected Salvage Revenue**: ${calc_result['expected_salvage_revenue']:,.2f}
-   - **Expected Total Cost**: ${calc_result['expected_purchase_cost']:,.2f}
-   - **Expected Maximum Profit**: **${profit:,.2f}**
+   - **Expected Gross Revenue**: \\${calc_result['expected_revenue']:,.2f}
+   - **Expected Salvage Revenue**: \\${calc_result['expected_salvage_revenue']:,.2f}
+   - **Expected Total Cost**: \\${calc_result['expected_purchase_cost']:,.2f}
+   - **Expected Maximum Profit**: **\\${profit:,.2f}**
 """
+
+            insights = (
+                f"- **Marginal Economic Risk Balancing**: With a critical fractile of **{cr:.2%}** (Underage Cost Cu = ${cu:,.2f} vs. Overage Cost Co = ${co:,.2f}), "
+                f"the profit margin lost from an unmet sale exceeds overstocking cost, justifying an order of **{q_opt_rnd:,} units** ({q_opt_rnd - inputs['demand_mean']:+,.0f} units relative to mean demand).\n"
+                f"- **Service Assurance vs. Waste**: At this stocking quantity, expected in-stock probability is **{calc_result['in_stock_probability']:.1%}**, yielding expected maximum net profit of **${profit:,.2f}** while limiting expected leftover stock to **{leftover:,.1f} units**.\n"
+                f"- **Salvage & Markdown Optimization**: Unsold units recover **${inputs.get('salvage_value', 0):,.2f}** each; negotiating higher buy-back terms or secondary markdown channels reduces overage penalty and elevates optimal stocking quantities."
+            )
         else:
             rec = "Unable to provide specific recommendation for unknown model."
             exp = "Please provide more details regarding your inventory question."
+            insights = "Please specify model parameters to view strategic managerial insights."
 
         if calc_result and ("inputs_extracted" in calc_result or "inputs" in calc_result):
             exp = exp.strip() + "\n\n" + self._render_student_verification_sections(calc_result, verification_checks)
 
-        return rec, exp, vis_data
+        return rec, exp, vis_data, insights
 
     # =========================================================================
     # Full Agent Orchestration Pipeline
@@ -1259,12 +1305,12 @@ class InventoryDecisionAgent:
         ))
 
         # Step 6: Explain
-        rec, exp, vis_data = self.explain(model_type, extracted_inputs, calc_result, verification_checks)
+        rec, exp, vis_data, insights = self.explain(model_type, extracted_inputs, calc_result, verification_checks)
         step_traces.append(AgentStepTrace(
             step_number=6,
             step_name="Explain",
             summary="Synthesized executive recommendation, step-by-step math derivation, and strategic advice.",
-            details={"recommendation": rec}
+            details={"recommendation": rec, "managerial_insights": insights}
         ))
 
         return AgentResponse(
@@ -1281,5 +1327,6 @@ class InventoryDecisionAgent:
             detailed_explanation=exp,
             step_traces=step_traces,
             visualization_data=vis_data,
+            managerial_insights=insights,
             success=True
         )
