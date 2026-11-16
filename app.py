@@ -15,6 +15,7 @@ Provides:
 """
 
 import sys
+from typing import Optional
 import pandas as pd
 import numpy as np
 
@@ -133,6 +134,32 @@ def run_cli():
             for k, v in response.calculation_result.items():
                 if k not in ["model", "tier_evaluations", "inputs_extracted", "variable_definitions", "formula", "formula_with_substituted_values", "intermediate_calculations", "final_answer", "verification_checks", "assumptions"]:
                     print(f"  {k:35}: {v}")
+
+
+# =============================================================================
+# Custom HTML/CSS Card Metric Renderer
+# =============================================================================
+
+def render_metric_card(label: str, value: str, subtext: Optional[str] = None) -> str:
+    """
+    Renders a custom HTML/CSS card for analytical metrics with clean text wrapping,
+    avoiding default st.metric ellipsis truncation.
+    """
+    subtext_html = (
+        f"<br><span style='font-size: 0.80rem; font-weight: 600; color: #4b5563;'>{subtext}</span>"
+        if subtext else ""
+    )
+    return (
+        f'<div style="background-color: #f8f9fa; border-radius: 10px; padding: 12px 8px; '
+        f'text-align: center; border: 1px solid #e9ecef; min-height: 88px; display: flex; '
+        f'flex-direction: column; justify-content: center;">'
+        f'<div style="font-size: 0.72rem; color: #6c757d; text-transform: uppercase; font-weight: 600; '
+        f'letter-spacing: 0.5px; margin-bottom: 4px;">{label}</div>'
+        f'<div style="font-size: 1.05rem; font-weight: 700; color: #1f2937; white-space: normal; '
+        f'word-wrap: break-word; line-height: 1.35;">'
+        f'{value}{subtext_html}'
+        f'</div></div>'
+    )
 
 
 # =============================================================================
@@ -389,40 +416,103 @@ def run_streamlit():
 
                 if m_type == InventoryModelType.EOQ:
                     k1, k2, k3, k4, k5, k6 = st.columns(6)
-                    k1.metric("Optimal EOQ", f"{res['eoq_rounded']:,} units", f"Exact: {res['eoq']:.1f}")
-                    k2.metric("Order Frequency", f"{res['orders_per_year']:.1f} orders/yr")
-                    k3.metric("Order Cycle Time", f"{res['cycle_time_days']:.0f} work days ({res['cycle_time_years']:.2f} yr)")
-                    k4.metric("Annual Ordering Cost", f"${res['annual_ordering_cost']:,.2f}")
-                    k5.metric("Annual Holding Cost", f"${res['annual_holding_cost']:,.2f}")
-                    k6.metric("Total Annual Inv Cost", f"${res['total_annual_inventory_cost']:,.2f}")
+                    with k1:
+                        st.markdown(
+                            render_metric_card(
+                                "Optimal EOQ",
+                                f"{res['eoq_rounded']:,} units",
+                                f"(exact: {res['eoq']:.1f})"
+                            ),
+                            unsafe_allow_html=True
+                        )
+                    with k2:
+                        st.markdown(
+                            render_metric_card(
+                                "Order Frequency",
+                                f"{res['orders_per_year']:.1f} orders/year"
+                            ),
+                            unsafe_allow_html=True
+                        )
+                    with k3:
+                        st.markdown(
+                            render_metric_card(
+                                "Order Cycle Time",
+                                f"{res['cycle_time_days']:.0f} work days",
+                                f"({res['cycle_time_years']:.2f} yr)"
+                            ),
+                            unsafe_allow_html=True
+                        )
+                    with k4:
+                        st.markdown(
+                            render_metric_card(
+                                "Annual Ordering Cost",
+                                f"${res['annual_ordering_cost']:,.2f}"
+                            ),
+                            unsafe_allow_html=True
+                        )
+                    with k5:
+                        st.markdown(
+                            render_metric_card(
+                                "Annual Holding Cost",
+                                f"${res['annual_holding_cost']:,.2f}"
+                            ),
+                            unsafe_allow_html=True
+                        )
+                    with k6:
+                        tot_val = f"${res['total_annual_cost']:,.2f}" if res.get("total_annual_cost") else f"${res['total_annual_inventory_cost']:,.2f}"
+                        sub_var = f"(Variable: ${res['total_annual_inventory_cost']:,.2f})"
+                        st.markdown(
+                            render_metric_card(
+                                "Total Annual Inv Cost",
+                                tot_val,
+                                sub_var
+                            ),
+                            unsafe_allow_html=True
+                        )
 
                 elif m_type == InventoryModelType.QUANTITY_DISCOUNT:
                     k1, k2, k3, k4 = st.columns(4)
-                    k1.metric("Optimal Tier", f"Tier {res['optimal_tier_index']}")
-                    k2.metric("Optimal Order Quantity", f"{res['optimal_order_quantity']:,.0f} units")
-                    k3.metric("Discounted Unit Price", f"${res['optimal_unit_price']:.2f}")
-                    k4.metric("Annual Cost Savings", f"${res['total_savings']:,.2f}", f"{res['savings_percentage']:.1f}% saved")
+                    with k1:
+                        st.markdown(render_metric_card("Optimal Tier", f"Tier {res['optimal_tier_index']}"), unsafe_allow_html=True)
+                    with k2:
+                        st.markdown(render_metric_card("Optimal Order Quantity", f"{res['optimal_order_quantity']:,.0f} units"), unsafe_allow_html=True)
+                    with k3:
+                        st.markdown(render_metric_card("Discounted Unit Price", f"${res['optimal_unit_price']:.2f}"), unsafe_allow_html=True)
+                    with k4:
+                        st.markdown(render_metric_card("Annual Cost Savings", f"${res['total_savings']:,.2f}", f"({res['savings_percentage']:.1f}% saved)"), unsafe_allow_html=True)
 
                 elif m_type == InventoryModelType.SAFETY_STOCK_ROP:
                     k1, k2, k3, k4 = st.columns(4)
-                    k1.metric("Reorder Point (ROP)", f"{res['reorder_point_rounded']:,} units", f"Exact: {res['reorder_point']:.1f}")
-                    k2.metric("Safety Stock Buffer", f"{res['safety_stock_rounded']:,} units")
-                    k3.metric("Lead Time Demand", f"{res['expected_lead_time_demand']:,.1f} units")
-                    k4.metric("Cycle Service Level", f"{res['service_level']:.1%}", f"Z = {res['z_score']:.2f}")
+                    with k1:
+                        st.markdown(render_metric_card("Reorder Point (ROP)", f"{res['reorder_point_rounded']:,} units", f"(exact: {res['reorder_point']:.1f})"), unsafe_allow_html=True)
+                    with k2:
+                        st.markdown(render_metric_card("Safety Stock Buffer", f"{res['safety_stock_rounded']:,} units"), unsafe_allow_html=True)
+                    with k3:
+                        st.markdown(render_metric_card("Lead Time Demand", f"{res['expected_lead_time_demand']:,.1f} units"), unsafe_allow_html=True)
+                    with k4:
+                        st.markdown(render_metric_card("Cycle Service Level", f"{res['service_level']:.1%}", f"(Z = {res['z_score']:.2f})"), unsafe_allow_html=True)
 
                 elif m_type == InventoryModelType.FIXED_PERIOD_REVIEW:
                     k1, k2, k3, k4 = st.columns(4)
-                    k1.metric("Recommended Order Q", f"{res['recommended_order_quantity_rounded']:,} units")
-                    k2.metric("Target Order-Up-To Level", f"{res['target_inventory_level_rounded']:,} units")
-                    k3.metric("Safety Stock", f"{res['safety_stock_rounded']:,} units")
-                    k4.metric("Protection Interval", f"{res['protection_interval']:.1f} periods", f"P={res['review_period']} + L={res['lead_time']}")
+                    with k1:
+                        st.markdown(render_metric_card("Recommended Order Q", f"{res['recommended_order_quantity_rounded']:,} units"), unsafe_allow_html=True)
+                    with k2:
+                        st.markdown(render_metric_card("Target Order-Up-To Level", f"{res['target_inventory_level_rounded']:,} units"), unsafe_allow_html=True)
+                    with k3:
+                        st.markdown(render_metric_card("Safety Stock", f"{res['safety_stock_rounded']:,} units"), unsafe_allow_html=True)
+                    with k4:
+                        st.markdown(render_metric_card("Protection Interval", f"{res['protection_interval']:.1f} periods", f"(P={res['review_period']} + L={res['lead_time']})"), unsafe_allow_html=True)
 
                 elif m_type == InventoryModelType.NEWSVENDOR:
                     k1, k2, k3, k4 = st.columns(4)
-                    k1.metric("Optimal Order Quantity", f"{res['optimal_order_quantity_rounded']:,} units", f"Exact: {res['optimal_order_quantity']:.1f}")
-                    k2.metric("Critical Fractile", f"{res['critical_fractile']:.2%}", f"Cu=${res['underage_cost']} / Co=${res['overage_cost']}")
-                    k3.metric("Expected Maximum Profit", f"${res['expected_profit']:,.2f}")
-                    k4.metric("In-Stock Probability", f"{res['in_stock_probability']:.1%}")
+                    with k1:
+                        st.markdown(render_metric_card("Optimal Order Quantity", f"{res['optimal_order_quantity_rounded']:,} units", f"(exact: {res['optimal_order_quantity']:.1f})"), unsafe_allow_html=True)
+                    with k2:
+                        st.markdown(render_metric_card("Critical Fractile", f"{res['critical_fractile']:.2%}", f"(Cu=${res['underage_cost']} / Co=${res['overage_cost']})"), unsafe_allow_html=True)
+                    with k3:
+                        st.markdown(render_metric_card("Expected Maximum Profit", f"${res['expected_profit']:,.2f}"), unsafe_allow_html=True)
+                    with k4:
+                        st.markdown(render_metric_card("In-Stock Probability", f"{res['in_stock_probability']:.1%}"), unsafe_allow_html=True)
 
                 # Verification & Sanity Checks
                 st.subheader("4. Automated Mathematical & Operational Verification")
