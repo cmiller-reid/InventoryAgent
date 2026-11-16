@@ -671,7 +671,7 @@ def run_streamlit():
                 st.error(f"**Status**: {response.error_message}")
 
             # 7-Step Architecture Flow Display
-            with st.expander("🔍 Architecture Pipeline Execution Trace (Click to inspect stages)", expanded=True):
+            with st.expander("🔍 Architecture Pipeline Execution Trace (Click to inspect stages)", expanded=False):
                 cols_step = st.columns(min(7, len(response.step_traces)))
                 for idx, trace in enumerate(response.step_traces):
                     with cols_step[idx % len(cols_step)]:
@@ -699,10 +699,7 @@ def run_streamlit():
                     unsafe_allow_html=True
                 )
 
-                st.write("")
-
-                # KPI Metrics Cards
-                st.subheader("Core Analytical Results")
+                # KPI Metrics Cards (rendered directly underneath Executive Recommendation banner)
                 res = response.calculation_result
                 m_type = response.model_type
 
@@ -806,18 +803,9 @@ def run_streamlit():
                     with k4:
                         st.markdown(render_metric_card("In-Stock Probability", f"{res['in_stock_probability']:.1%}"), unsafe_allow_html=True)
 
-                # Verification & Sanity Checks
-                st.subheader("Automated Mathematical & Operational Verification")
-                for check in response.verification_checks:
-                    if check.status == "PASS":
-                        st.success(f"**{check.name} [PASSED]**: {check.message}")
-                    elif check.status == "WARNING":
-                        st.warning(f"**{check.name} [CAUTION]**: {check.message}")
-                    else:
-                        st.error(f"**{check.name} [FAILED]**: {check.message}")
-
-                # Visual Charts
+                # Visual Charts (reordered immediately after metric cards)
                 if response.visualization_data:
+                    st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
                     st.subheader("Visual Optimization Curves")
                     vtype = response.visualization_data["type"]
                     vdata = response.visualization_data["data"]
@@ -849,6 +837,17 @@ def run_streamlit():
                             height=360
                         ).interactive()
                         st.altair_chart(chart, use_container_width=True)
+
+                # Verification & Sanity Checks (rendered after Visual Optimization Curves)
+                st.markdown("<div style='margin-top: 28px;'></div>", unsafe_allow_html=True)
+                st.subheader("Automated Mathematical & Operational Verification")
+                for check in response.verification_checks:
+                    if check.status == "PASS":
+                        st.success(f"**{check.name} [PASSED]**: {check.message}")
+                    elif check.status == "WARNING":
+                        st.warning(f"**{check.name} [CAUTION]**: {check.message}")
+                    else:
+                        st.error(f"**{check.name} [FAILED]**: {check.message}")
 
                 # Dedicated 8-Part Student Verification Breakdown for BAN 517
                 if "inputs_extracted" in res or "intermediate_calculations" in res:
