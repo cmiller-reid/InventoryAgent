@@ -1554,7 +1554,7 @@ def classify_inventory_multicriteria(
     score_cutoffs: Optional[Dict[str, float]] = None
 ) -> Dict[str, Any]:
     """
-    Performs deterministic multi-criteria inventory stratification (ABC/D Analysis)
+    Performs deterministic multi-criteria inventory classification (ABC/D Analysis)
     using Sales ($) and POS (Point-of-Sale) Hits according to BAN 517 methodology:
 
     Step 1 - Classify Sales and POS Hits separately:

@@ -52,7 +52,7 @@ Customer Question
 5. **Newsvendor Model (Single-Period Probabilistic)**
    - Determines critical fractile $CR = \frac{C_u}{C_u + C_o}$.
    - Computes optimal order quantity, expected lost sales, expected leftover inventory, and maximum expected net profit using standard normal loss functions.
-6. **Multi-Criteria Inventory Stratification (Sales & POS Hits Methodology)**
+6. **Multi-Criteria Inventory Classification (Sales & POS Hits Methodology)**
    - **Step 1 — Separate Pareto Classification**: Ranks items independently on **Sales ($)** and **POS (Point-of-Sale) Hits** into Pareto classes:
      - Class A: 0% to 60% cumulative share
      - Class B: 61% to 80% cumulative share

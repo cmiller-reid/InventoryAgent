@@ -301,19 +301,19 @@ def run_streamlit():
             missing_val_cols = validate_inventory_csv_columns(uploaded_df)
 
             # -----------------------------------------------------------------
-            # BRANCH 1: Multi-Criteria Inventory Stratification (Sales & POS Hits)
+            # BRANCH 1: Multi-Criteria Inventory Classification (Sales & POS Hits)
             # -----------------------------------------------------------------
             if not missing_class_cols:
-                st.header("🏷️ Multicriteria Inventory Stratification (Sales & POS Hits)")
+                st.header("🏷️ Multicriteria Inventory Classification (Sales & POS Hits)")
                 st.caption(
-                    "Deterministic 3-Stage Multi-Criteria Stratification using **Sales ($)** and **POS Hits** | "
+                    "Deterministic 3-Stage Multi-Criteria Classification using **Sales ($)** and **POS Hits** | "
                     "BAN 517 Supply Chain Analytics Methodology"
                 )
 
                 # Methodology Step-by-Step Overview Callout
                 st.markdown("""
                 <div style="background-color: #f8f9fa; border-left: 5px solid #1a73e8; padding: 14px 18px; border-radius: 6px; margin-bottom: 16px; font-size: 0.93rem; color: #1f2937;">
-                    <div style="font-weight: 700; color: #1a73e8; margin-bottom: 6px; font-size: 1.0rem;">📚 Multicriteria Stratification Methodology</div>
+                    <div style="font-weight: 700; color: #1a73e8; margin-bottom: 6px; font-size: 1.0rem;">📚 Multicriteria Classification Methodology</div>
                     <ul style="margin: 0; padding-left: 20px; line-height: 1.6;">
                         <li><b>Step 1 — Classify Sales and POS Hits Separately</b>: Rank items independently using Pareto thresholds:
                             <b>A</b> (0 to 60% cumulative share; &lt; 61%), <b>B</b> (61 to 80% cumulative share; &lt; 81%),
@@ -329,7 +329,7 @@ def run_streamlit():
                 """, unsafe_allow_html=True)
 
                 # Weighting Controls (Default: 65% Sales, 35% POS Hits)
-                with st.expander("⚙️ Stratification Parameters & Sensitivity Weighting Controls (Click to inspect / customize)", expanded=False):
+                with st.expander("⚙️ Classification Parameters & Sensitivity Weighting Controls (Click to inspect / customize)", expanded=False):
                     w_col1, w_col2, w_col3 = st.columns([2, 2, 3])
                     sales_weight_pct = w_col1.slider(
                         "Sales ($) Criteria Weight (%)",
