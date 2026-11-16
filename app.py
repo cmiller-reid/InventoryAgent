@@ -35,7 +35,9 @@ from inventory_tools import (
     generate_eoq_cost_curve,
     generate_newsvendor_curve,
     validate_inventory_csv_columns,
-    analyze_inventory_dataframe
+    analyze_inventory_dataframe,
+    validate_inventory_classification_columns,
+    classify_inventory_multicriteria
 )
 
 
@@ -230,7 +232,40 @@ def run_streamlit():
         st.header("Data Upload")
         uploaded_file = st.file_uploader("Upload CSV File", type=["csv"])
 
-        sample_csv_data = (
+        # Sample Datasets for Testing
+        sample_classification_csv = (
+            "Item Number,Item Name,UoM,Sales ($),Hits\n"
+            "#216,Industrial Motor 5HP,EA,4694447,186\n"
+            "#149,Hydraulic Pump Unit,EA,4551669,55\n"
+            "#191,Programmable Logic Controller,EA,4347291,317\n"
+            "#425,Servo Drive Controller,EA,4192948,48\n"
+            "#136,Digital Sensor Module,EA,3507850,170\n"
+            "#411,Pneumatic Cylinder 50mm,EA,1278763,76\n"
+            "#435,Control Valve Assembly,EA,1273914,10\n"
+            "#483,Pressure Transducer,EA,1251174,7\n"
+            "#406,Flow Meter 2-Inch,EA,1216696,227\n"
+            "#481,Optical Proximity Switch,EA,1090841,308\n"
+            "#1432,Rotary Encoder 1000PPR,EA,1084760,97\n"
+            "#490,Thermal Overload Relay,EA,1062341,257\n"
+            "#1129,Magnetic Contactor 40A,EA,1043602,86\n"
+            "#240,Industrial Bearing 6205,EA,996214,92\n"
+            "#488,Limit Switch Heavy Duty,EA,890520,64\n"
+            "#244,Stainless Steel Fastener Set,PK,754200,42\n"
+            "#135,Terminal Block 10-Pole,EA,621000,81\n"
+            "#1164,V-Belt Section B,EA,589400,60\n"
+            "#1240,Filter Regulator Lubricator,EA,310500,28\n"
+            "#464,Wire Duct 2x2 Gray,FT,185200,15\n"
+            "#210,Cable Gland M20,PK,142000,35\n"
+            "#107,Replacement Fuse 10A,PK,98500,12\n"
+            "#139,Warning Label Decal,PK,65200,8\n"
+            "#1191,Hex Nut M8 100pk,PK,42100,6\n"
+            "#161,Flat Washer M8 100pk,PK,28400,5\n"
+            "#371,O-Ring Nitrile 70A,PK,19500,4\n"
+            "#398,Grounding Lug Copper,EA,14200,90\n"
+            "#427,Rubber Grommet Assortment,PK,8500,3\n"
+            "#463,Zip Ties 8-Inch 100pk,PK,4200,2\n"
+        )
+        sample_valuation_csv = (
             "Product,Category,Units,Unit Cost\n"
             "Widget Alpha,Electronics,450,15.50\n"
             "Sensor Beta,Electronics,1200,8.25\n"
@@ -238,12 +273,21 @@ def run_streamlit():
             "Torque Wrench,Tools,180,45.00\n"
             "Safety Goggles,PPE,850,5.75\n"
         )
+
         st.download_button(
-            label="📥 Download Sample CSV",
-            data=sample_csv_data,
-            file_name="sample_inventory.csv",
+            label="📥 Download Classification Sample CSV",
+            data=sample_classification_csv,
+            file_name="sample_classification_inventory.csv",
             mime="text/csv",
-            help="Download a formatted sample CSV to test the Data Upload feature immediately.",
+            help="Download a formatted sample CSV with Item Number, Item Name, UoM, Sales ($), and Hits to test Multi-Criteria Classification.",
+            use_container_width=True
+        )
+        st.download_button(
+            label="📥 Download Valuation Sample CSV",
+            data=sample_valuation_csv,
+            file_name="sample_valuation_inventory.csv",
+            mime="text/csv",
+            help="Download a formatted sample CSV with Product, Category, Units, and Unit Cost to test Inventory Valuation.",
             use_container_width=True
         )
 
@@ -253,20 +297,154 @@ def run_streamlit():
     if uploaded_file is not None:
         try:
             uploaded_df = pd.read_csv(uploaded_file)
-            missing_cols = validate_inventory_csv_columns(uploaded_df)
+            missing_class_cols, class_col_map = validate_inventory_classification_columns(uploaded_df)
+            missing_val_cols = validate_inventory_csv_columns(uploaded_df)
 
-            if missing_cols:
-                st.error(
-                    f"❌ **Missing Required Columns**: `{', '.join(missing_cols)}`.\n\n"
-                    f"The uploaded CSV must contain the following required columns: "
-                    f"`Product`, `Category`, `Units`, `Unit Cost`."
+            # -----------------------------------------------------------------
+            # BRANCH 1: Multi-Criteria Inventory Classification (A / B / C / D)
+            # -----------------------------------------------------------------
+            if not missing_class_cols:
+                st.header("🏷️ Multi-Criteria Inventory Classification (A / B / C / D Analysis)")
+                st.caption(
+                    "Deterministic Multi-Criteria Pareto Stratification using **Sales ($)** and **Order Hits** "
+                    "with Weighted Composite Scoring and 2D Cross-Classification Matrix."
                 )
-            else:
+
+                # Optional Interactive Weight & Sensitivity Controls
+                with st.expander("⚙️ Classification Parameters & Weighting Controls (Click to inspect / customize)", expanded=False):
+                    w_col1, w_col2, w_col3 = st.columns([2, 2, 3])
+                    sales_weight_pct = w_col1.slider("Sales ($) Criteria Weight (%)", min_value=10, max_value=90, value=50, step=5)
+                    hits_weight_pct = 100 - sales_weight_pct
+                    w_col2.metric("Hits Criteria Weight (%)", f"{hits_weight_pct}%")
+                    w_col3.info(
+                        f"**Current Scoring Formula**:\n"
+                        f"Composite Score = ({sales_weight_pct/100:.2f} × Sales Score) + ({hits_weight_pct/100:.2f} × Hits Score)\n\n"
+                        f"Cutoffs: A ≥ 3.40 | B ≥ 2.80 | C ≥ 2.10 | D < 2.10"
+                    )
+
+                w_sales = sales_weight_pct / 100.0
+                w_hits = hits_weight_pct / 100.0
+
+                # Execute deterministic classification analysis
+                class_res = classify_inventory_multicriteria(
+                    uploaded_df,
+                    sales_weight=w_sales,
+                    hits_weight=w_hits
+                )
+                classified_df = class_res["df"]
+                class_summary = class_res["class_summary"]
+
+                # Dataset Overview Metrics
+                st.subheader("Dataset Dimensions & Summary")
+                d1, d2, d3, d4 = st.columns(4)
+                d1.metric("Total Classified SKUs", f"{class_res['total_skus']:,}")
+                d2.metric("Total Annual Sales", f"${class_res['total_sales']:,.2f}")
+                d3.metric("Total Order Hits", f"{class_res['total_hits']:,}")
+                d4.metric("Avg Annual Sales / SKU", f"${class_res['avg_sales_per_sku']:,.2f}")
+
+                st.write("")
+
+                # Class Breakdown KPI Cards
+                st.subheader("Classification Distribution by Class")
+                kpi_a, kpi_b, kpi_c, kpi_d = st.columns(4)
+                cards_meta = [
+                    (kpi_a, "Class A (Strategic)", "#1b5e20", "#e8f5e9"),
+                    (kpi_b, "Class B (Moderate)", "#0d47a1", "#e3f2fd"),
+                    (kpi_c, "Class C (Low Velocity)", "#e65100", "#fff3e0"),
+                    (kpi_d, "Class D (Slow / Dead)", "#b71c1c", "#ffebee")
+                ]
+                for (col, label, border_c, bg_c), (_, row_data) in zip(cards_meta, class_summary.iterrows()):
+                    with col:
+                        st.markdown(
+                            f"""<div style="background-color: {bg_c}; border-top: 4px solid {border_c}; padding: 12px 14px; border-radius: 8px; margin-bottom: 8px;">
+                                <div style="font-size: 0.8rem; font-weight: 700; color: {border_c}; text-transform: uppercase;">{label}</div>
+                                <div style="font-size: 1.25rem; font-weight: 800; color: #212529; margin-top: 4px;">{int(row_data['SKU Count']):,} SKUs <span style="font-size: 0.85rem; font-weight: 500; color: #495057;">({row_data['% of SKUs']:.1f}%)</span></div>
+                                <div style="font-size: 0.95rem; font-weight: 700; color: #1f2937; margin-top: 6px;">Sales: ${row_data['Total Sales ($)']:,.0f} <span style="font-size: 0.8rem; font-weight: normal; color: #6c757d;">({row_data['% of Sales']:.1f}%)</span></div>
+                                <div style="font-size: 0.85rem; color: #495057;">Hits: {int(row_data['Total Hits']):,} <span style="font-size: 0.8rem; color: #6c757d;">({row_data['% of Hits']:.1f}%)</span></div>
+                            </div>""",
+                            unsafe_allow_html=True
+                        )
+
+                st.write("")
+
+                # Distribution Summary Table with Policies
+                st.subheader("Class Summary & Strategic Inventory Policies")
+                st.dataframe(
+                    class_summary,
+                    column_config={
+                        "Class": st.column_config.TextColumn("Class", width="small"),
+                        "SKU Count": st.column_config.NumberColumn("SKU Count", format="%d"),
+                        "% of SKUs": st.column_config.NumberColumn("% of SKUs", format="%.1f%%"),
+                        "Total Sales ($)": st.column_config.NumberColumn("Total Sales ($)", format="$%,.2f"),
+                        "% of Sales": st.column_config.NumberColumn("% of Sales", format="%.1f%%"),
+                        "Total Hits": st.column_config.NumberColumn("Total Hits", format="%d"),
+                        "% of Hits": st.column_config.NumberColumn("% of Hits", format="%.1f%%"),
+                        "Recommended Inventory Policy": st.column_config.TextColumn("Recommended Inventory Management Policy", width="large")
+                    },
+                    hide_index=True,
+                    use_container_width=True
+                )
+
+                st.write("")
+
+                # 2D Cross-Classification Matrix
+                st.subheader("2D Cross-Classification Matrix (Sales Class × Hits Class)")
+                st.caption("Rows represent Sales ($) Pareto Class; Columns represent Order Hits Pareto Class.")
+
+                crosstab_view = st.radio(
+                    "Select Cross-Tabulation Metric:",
+                    ["SKU Count (Number of Items)", "Total Sales ($)"],
+                    horizontal=True
+                )
+                if "SKU Count" in crosstab_view:
+                    st.dataframe(class_res["crosstab_counts"], use_container_width=True)
+                else:
+                    st.dataframe(
+                        class_res["crosstab_sales"].style.format("${:,.2f}"),
+                        use_container_width=True
+                    )
+
+                st.write("")
+
+                # Complete Classified DataFrame & Export
+                st.subheader("Classified Inventory Master DataFrame")
+                col_dl1, col_dl2 = st.columns([3, 1])
+                with col_dl1:
+                    st.caption(f"Showing all {len(classified_df)} items with individual Sales/Hits ranks, weighted composite score, and final class.")
+                with col_dl2:
+                    csv_export = classified_df.to_csv(index=False)
+                    st.download_button(
+                        label="📥 Export Classified CSV",
+                        data=csv_export,
+                        file_name="classified_inventory_results.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+
+                st.dataframe(
+                    classified_df,
+                    column_config={
+                        "Sales ($)": st.column_config.NumberColumn("Sales ($)", format="$%,.2f"),
+                        "Hits": st.column_config.NumberColumn("Hits", format="%d"),
+                        "Sales Cumulative Pct": st.column_config.NumberColumn("Sales Cum %", format="%.2f%%"),
+                        "Hits Cumulative Pct": st.column_config.NumberColumn("Hits Cum %", format="%.2f%%"),
+                        "Weighted Score": st.column_config.NumberColumn("Weighted Score", format="%.2f"),
+                        "Final Class": st.column_config.TextColumn("Final Class")
+                    },
+                    use_container_width=True
+                )
+
+                st.divider()
+
+            # -----------------------------------------------------------------
+            # BRANCH 2: Existing Inventory Valuation Analysis (Units & Unit Cost)
+            # -----------------------------------------------------------------
+            elif not missing_val_cols:
                 # Execute deterministic pandas analysis
                 analysis = analyze_inventory_dataframe(uploaded_df)
                 processed_df = analysis["df"]
 
-                st.header("📁 Uploaded Inventory Data & Analysis")
+                st.header("📁 Uploaded Inventory Valuation & Analysis")
 
                 # Display Dataset Dimensions & Column Names
                 st.subheader("Dataset Dimensions & Schema")
@@ -319,15 +497,33 @@ def run_streamlit():
 
                 st.divider()
 
+            # -----------------------------------------------------------------
+            # BRANCH 3: Schema Validation Error (Neither Schema Matched)
+            # -----------------------------------------------------------------
+            else:
+                st.error(
+                    f"❌ **Uploaded CSV does not match either supported inventory schema.**\n\n"
+                    f"Please upload a CSV file conforming to one of the following schemas:\n\n"
+                    f"1. **Multi-Criteria Inventory Classification Schema**:\n"
+                    f"   - Required Columns: `Item Number`, `Item Name`, `UoM`, `Sales ($)`, `Hits`\n"
+                    f"   - Missing from your file: `{', '.join(missing_class_cols)}`\n\n"
+                    f"2. **Inventory Valuation Schema**:\n"
+                    f"   - Required Columns: `Product`, `Category`, `Units`, `Unit Cost`\n"
+                    f"   - Missing from your file: `{', '.join(missing_val_cols)}`\n\n"
+                    f"💡 *Tip: You can download formatted sample templates from the sidebar on the left.*"
+                )
+
         except Exception as e:
             st.error(f"❌ Error processing uploaded CSV file: {str(e)}")
     else:
         # Guidance notice when no CSV is currently uploaded
         st.info(
-            "💡 **CSV Inventory Data Upload & Analysis Available**: "
-            "To analyze bulk inventory data, use the **'Upload CSV File'** widget at the bottom of the left sidebar "
-            "(or click **'📥 Download Sample CSV'** in the sidebar to download a test file). "
-            "Required columns: `Product`, `Category`, `Units`, `Unit Cost`."
+            "💡 **CSV Inventory Data Upload & Analysis Available**:\n"
+            "Use the **'Upload CSV File'** widget at the bottom of the left sidebar to upload inventory data. "
+            "The system automatically detects your dataset format:\n"
+            "- **Multi-Criteria Classification (A/B/C/D)**: requires `Item Number`, `Item Name`, `UoM`, `Sales ($)`, `Hits`\n"
+            "- **Inventory Valuation**: requires `Product`, `Category`, `Units`, `Unit Cost`\n\n"
+            "*(Sample templates for both formats are available for instant download in the sidebar!)*"
         )
 
     # Main Tabs: Natural Language Agent vs. Interactive Calculators

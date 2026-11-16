@@ -1485,6 +1485,7 @@ def generate_newsvendor_curve(
 # =============================================================================
 
 REQUIRED_CSV_COLUMNS = ["Product", "Category", "Units", "Unit Cost"]
+REQUIRED_CLASSIFICATION_COLUMNS = ["Item Number", "Item Name", "UoM", "Sales ($)", "Hits"]
 
 
 def validate_inventory_csv_columns(df: Any) -> List[str]:
@@ -1493,6 +1494,281 @@ def validate_inventory_csv_columns(df: Any) -> List[str]:
     Returns a list of missing column names. Empty list means all columns are present.
     """
     return [col for col in REQUIRED_CSV_COLUMNS if col not in df.columns]
+
+
+def validate_inventory_classification_columns(df: Any) -> Tuple[List[str], Dict[str, str]]:
+    """
+    Validates that required multicriteria classification columns exist:
+    - Item Number
+    - Item Name
+    - UoM
+    - Sales ($)
+    - Hits
+
+    Supports case-insensitive matching and common supply chain synonyms.
+    Returns:
+        (missing_columns, column_mapping)
+        If missing_columns is empty, column_mapping maps standard names to the actual df column names.
+    """
+    synonyms = {
+        "Item Number": ["item number", "item no", "item #", "itemno", "item", "sku", "part number", "part no", "item_number"],
+        "Item Name": ["item name", "description", "item description", "product", "product name", "item_name", "part description"],
+        "UoM": ["uom", "unit of measure", "unit", "u_o_m", "unit_of_measure"],
+        "Sales ($)": ["sales ($)", "sales", "sales$", "total sales", "annual sales", "revenue", "sales_$", "sales amount"],
+        "Hits": ["hits", "order hits", "pick hits", "picks", "frequency", "orders", "order_hits", "pick_hits", "hit count"]
+    }
+
+    actual_cols_lower = {str(c).strip().lower(): str(c) for c in df.columns}
+    col_mapping = {}
+    missing = []
+
+    for standard_col, syn_list in synonyms.items():
+        found = False
+        # 1. Exact or lower-case match of standard name
+        if standard_col.lower() in actual_cols_lower:
+            col_mapping[standard_col] = actual_cols_lower[standard_col.lower()]
+            found = True
+        else:
+            # 2. Check synonyms
+            for syn in syn_list:
+                if syn in actual_cols_lower:
+                    col_mapping[standard_col] = actual_cols_lower[syn]
+                    found = True
+                    break
+        if not found:
+            missing.append(standard_col)
+
+    return missing, col_mapping
+
+
+def classify_inventory_multicriteria(
+    df_input: Any,
+    sales_weight: float = 0.50,
+    hits_weight: float = 0.50,
+    sales_cutoffs: Tuple[float, float, float] = (0.60, 0.80, 0.90),
+    hits_cutoffs: Tuple[float, float, float] = (0.60, 0.80, 0.90),
+    score_cutoffs: Optional[Dict[str, float]] = None
+) -> Dict[str, Any]:
+    """
+    Performs deterministic multi-criteria inventory classification (ABC/D Analysis)
+    using Sales ($) and Order Hits according to BAN 517 Supply Chain Analytics methodology.
+
+    Methodology:
+    1. Cleans and validates Sales ($) and Hits numeric inputs.
+    2. Computes Pareto cumulative percentages for Sales ($) and Order Hits.
+    3. Categorizes each SKU into Classes A, B, C, D for both Sales and Hits:
+       - Cumulative share <= 60% -> A
+       - Cumulative share <= 80% -> B
+       - Cumulative share <= 90% -> C
+       - Cumulative share > 90%  -> D
+    4. Converts categorical classes into numerical rank scores:
+       - Class A = 4.0 points
+       - Class B = 3.0 points
+       - Class C = 2.0 points
+       - Class D = 1.0 point
+    5. Calculates composite weighted score:
+       Weighted Score = (Sales Weight * Sales Score) + (Hits Weight * Hits Score)
+    6. Assigns Final Composite Class based on course cutoffs:
+       - Score >= 3.4 -> Class A
+       - Score >= 2.8 -> Class B
+       - Score >= 2.1 -> Class C
+       - Score < 2.1  -> Class D
+    7. Generates 2D cross-tabulation matrix (Sales Class x Hits Class) and summary metrics.
+
+    Returns a structured dictionary containing the augmented DataFrame, KPI summaries,
+    class distribution table, and 2D cross-tabulation matrices.
+    """
+    import pandas as pd
+
+    missing, col_map = validate_inventory_classification_columns(df_input)
+    if missing:
+        raise ValueError(f"Missing required classification columns: {', '.join(missing)}")
+
+    if score_cutoffs is None:
+        score_cutoffs = {"A": 3.4, "B": 2.8, "C": 2.1}
+
+    df = df_input.copy()
+
+    # Identify actual column names from mapping
+    col_item_num = col_map["Item Number"]
+    col_item_name = col_map["Item Name"]
+    col_uom = col_map["UoM"]
+    col_sales = col_map["Sales ($)"]
+    col_hits = col_map["Hits"]
+
+    # Clean numeric fields: remove currency symbols, commas, and negative/null values
+    if not pd.api.types.is_numeric_dtype(df[col_sales]):
+        df["_clean_sales"] = (
+            df[col_sales]
+            .astype(str)
+            .str.replace("$", "", regex=False)
+            .str.replace(",", "", regex=False)
+            .str.strip()
+        )
+        df["_clean_sales"] = pd.to_numeric(df["_clean_sales"], errors="coerce").fillna(0.0)
+    else:
+        df["_clean_sales"] = pd.to_numeric(df[col_sales], errors="coerce").fillna(0.0)
+    df["_clean_sales"] = df["_clean_sales"].clip(lower=0.0)
+
+    if not pd.api.types.is_numeric_dtype(df[col_hits]):
+        df["_clean_hits"] = (
+            df[col_hits]
+            .astype(str)
+            .str.replace(",", "", regex=False)
+            .str.strip()
+        )
+        df["_clean_hits"] = pd.to_numeric(df["_clean_hits"], errors="coerce").fillna(0.0)
+    else:
+        df["_clean_hits"] = pd.to_numeric(df[col_hits], errors="coerce").fillna(0.0)
+    df["_clean_hits"] = df["_clean_hits"].clip(lower=0.0)
+
+    total_sales = float(df["_clean_sales"].sum())
+    total_hits = float(df["_clean_hits"].sum())
+    total_skus = len(df)
+
+    # 1. Stratify by Sales ($)
+    # Sort descending by sales
+    df_sorted_sales = df.sort_values(by="_clean_sales", ascending=False).copy()
+    if total_sales > 0:
+        df_sorted_sales["Sales Share"] = df_sorted_sales["_clean_sales"] / total_sales
+        df_sorted_sales["Sales Cumulative Pct"] = df_sorted_sales["_clean_sales"].cumsum() / total_sales
+    else:
+        df_sorted_sales["Sales Share"] = 0.0
+        df_sorted_sales["Sales Cumulative Pct"] = 0.0
+
+    def assign_class(cum_pct_series: pd.Series, cutoffs: Tuple[float, float, float]) -> pd.Series:
+        classes = []
+        for idx, pct in enumerate(cum_pct_series):
+            if idx == 0:
+                # Top contributor is always Class A
+                classes.append("A")
+            elif pct <= cutoffs[0]:
+                classes.append("A")
+            elif pct <= cutoffs[1]:
+                classes.append("B")
+            elif pct <= cutoffs[2]:
+                classes.append("C")
+            else:
+                classes.append("D")
+        return pd.Series(classes, index=cum_pct_series.index)
+
+    df_sorted_sales["Sales Class"] = assign_class(df_sorted_sales["Sales Cumulative Pct"], sales_cutoffs)
+    df["Sales Class"] = df_sorted_sales["Sales Class"]
+    df["Sales Cumulative Pct"] = df_sorted_sales["Sales Cumulative Pct"]
+
+    # 2. Stratify by Hits
+    # Sort descending by hits
+    df_sorted_hits = df.sort_values(by="_clean_hits", ascending=False).copy()
+    if total_hits > 0:
+        df_sorted_hits["Hits Share"] = df_sorted_hits["_clean_hits"] / total_hits
+        df_sorted_hits["Hits Cumulative Pct"] = df_sorted_hits["_clean_hits"].cumsum() / total_hits
+    else:
+        df_sorted_hits["Hits Share"] = 0.0
+        df_sorted_hits["Hits Cumulative Pct"] = 0.0
+
+    df_sorted_hits["Hits Class"] = assign_class(df_sorted_hits["Hits Cumulative Pct"], hits_cutoffs)
+    df["Hits Class"] = df_sorted_hits["Hits Class"]
+    df["Hits Cumulative Pct"] = df_sorted_hits["Hits Cumulative Pct"]
+
+    # 3. Numerical Scoring & Composite Multi-Criteria Weighting
+    score_map = {"A": 4.0, "B": 3.0, "C": 2.0, "D": 1.0}
+    df["Sales Score"] = df["Sales Class"].map(score_map).astype(float)
+    df["Hits Score"] = df["Hits Class"].map(score_map).astype(float)
+
+    # Normalize weights if user provided non-normalized values
+    sum_weights = sales_weight + hits_weight
+    w_sales = sales_weight / sum_weights if sum_weights > 0 else 0.50
+    w_hits = hits_weight / sum_weights if sum_weights > 0 else 0.50
+
+    df["Weighted Score"] = (w_sales * df["Sales Score"]) + (w_hits * df["Hits Score"])
+
+    def assign_composite_final_class(score: float, cutoffs: Dict[str, float]) -> str:
+        if score >= cutoffs.get("A", 3.4):
+            return "A"
+        elif score >= cutoffs.get("B", 2.8):
+            return "B"
+        elif score >= cutoffs.get("C", 2.1):
+            return "C"
+        else:
+            return "D"
+
+    df["Final Class"] = df["Weighted Score"].apply(lambda s: assign_composite_final_class(s, score_cutoffs))
+
+    # Overwrite cleaned values into standard columns for clean display
+    df["Sales ($)"] = df["_clean_sales"]
+    df["Hits"] = df["_clean_hits"].astype(int)
+    df = df.drop(columns=["_clean_sales", "_clean_hits"])
+
+    # 4. Generate Class Distribution Summary
+    classes_list = ["A", "B", "C", "D"]
+    policy_descriptions = {
+        "A": "Strategic / High Velocity & Value. Tight continuous inventory monitoring, daily/weekly cycle counts, safety stock optimization, vendor-managed replenishment.",
+        "B": "Important / Moderate Velocity & Value. Standard periodic review (s, S) or EOQ reorder points, automated batch replenishment, monthly cycle counts.",
+        "C": "Low Velocity / Value. Simplified replenishment, bulk ordering, higher safety stock buffers to minimize ordering transactions and stockout attention.",
+        "D": "Dead / Slow-Moving. SKU rationalization candidate, make/order-on-demand only, or clearance/obsolescence liquidation write-off."
+    }
+
+    summary_rows = []
+    for cls in classes_list:
+        sub = df[df["Final Class"] == cls]
+        sku_count = len(sub)
+        sku_pct = (sku_count / total_skus * 100.0) if total_skus > 0 else 0.0
+        cls_sales = float(sub["Sales ($)"].sum())
+        cls_sales_pct = (cls_sales / total_sales * 100.0) if total_sales > 0 else 0.0
+        cls_hits = int(sub["Hits"].sum())
+        cls_hits_pct = (cls_hits / total_hits * 100.0) if total_hits > 0 else 0.0
+
+        summary_rows.append({
+            "Class": cls,
+            "SKU Count": sku_count,
+            "% of SKUs": sku_pct,
+            "Total Sales ($)": cls_sales,
+            "% of Sales": cls_sales_pct,
+            "Total Hits": cls_hits,
+            "% of Hits": cls_hits_pct,
+            "Recommended Inventory Policy": policy_descriptions[cls]
+        })
+
+    class_summary_df = pd.DataFrame(summary_rows)
+
+    # 5. 2D Cross-Classification Matrix (Sales Class x Hits Class)
+    crosstab_counts = pd.crosstab(
+        df["Sales Class"],
+        df["Hits Class"],
+        margins=True,
+        margins_name="Total"
+    )
+    # Ensure all 4 classes appear even if zero count
+    full_index = ["A", "B", "C", "D", "Total"]
+    crosstab_counts = crosstab_counts.reindex(index=full_index, columns=full_index, fill_value=0)
+
+    crosstab_sales = pd.crosstab(
+        df["Sales Class"],
+        df["Hits Class"],
+        values=df["Sales ($)"],
+        aggfunc="sum",
+        margins=True,
+        margins_name="Total"
+    ).fillna(0.0)
+    crosstab_sales = crosstab_sales.reindex(index=full_index, columns=full_index, fill_value=0.0)
+
+    return {
+        "df": df,
+        "total_skus": total_skus,
+        "total_sales": total_sales,
+        "total_hits": total_hits,
+        "avg_sales_per_sku": (total_sales / total_skus) if total_skus > 0 else 0.0,
+        "avg_hits_per_sku": (total_hits / total_skus) if total_skus > 0 else 0.0,
+        "class_summary": class_summary_df,
+        "crosstab_counts": crosstab_counts,
+        "crosstab_sales": crosstab_sales,
+        "weights": {"sales_weight": w_sales, "hits_weight": w_hits},
+        "cutoffs": {
+            "sales_cutoffs": sales_cutoffs,
+            "hits_cutoffs": hits_cutoffs,
+            "score_cutoffs": score_cutoffs
+        }
+    }
 
 
 def analyze_inventory_dataframe(df_input: Any) -> Dict[str, Any]:
