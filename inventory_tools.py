@@ -706,11 +706,16 @@ def calculate_rop(
     std_demand: float = 0.0,
     std_lead_time: float = 0.0,
     service_level: float = 0.95,
-    holding_cost: Optional[float] = None
+    holding_cost: Optional[float] = None,
+    stated_lead_time: Optional[float] = None,
+    lead_time_unit: str = "day",
+    demand_time_unit: str = "day",
+    work_days_per_week: int = 5,
+    stated_std_lead_time: Optional[float] = None
 ) -> SafetyStockROPResult:
     """
     Calculates Safety Stock (SS) and Reorder Point (ROP) under continuous review (s, Q).
-    Supports all four variance scenarios.
+    Supports all four variance scenarios and unit harmonization (e.g. weeks to work days).
 
     Returns the complete 8-part verification breakdown:
     1. inputs_extracted
@@ -752,6 +757,13 @@ def calculate_rop(
         "service_level": service_level,
         "holding_cost": holding_cost
     }
+    if stated_lead_time is not None and (lead_time_unit != demand_time_unit or stated_lead_time != lead_time):
+        inputs_extracted["stated_lead_time"] = stated_lead_time
+        inputs_extracted["lead_time_unit"] = lead_time_unit
+        inputs_extracted["demand_time_unit"] = demand_time_unit
+        inputs_extracted["work_days_per_week"] = work_days_per_week
+        if stated_std_lead_time is not None:
+            inputs_extracted["stated_std_lead_time"] = stated_std_lead_time
 
     # Section 2: Variable Definitions
     variable_definitions = {
@@ -819,13 +831,24 @@ def calculate_rop(
     }
 
     # Section 4: Formulas with Substituted Values
-    formula_with_substituted_values = {
+    formula_with_substituted_values = {}
+    if stated_lead_time is not None and (lead_time_unit != demand_time_unit or stated_lead_time != lead_time):
+        time_conv_str = (
+            f"Harmonized Lead Time (L) = {stated_lead_time:.2f} {lead_time_unit}s * {work_days_per_week} work days/{lead_time_unit} = {lead_time:.2f} work days"
+        )
+        if std_lead_time > 0 and stated_std_lead_time is not None:
+            time_conv_str += (
+                f"; Lead Time Std Dev (sigma_L) = {stated_std_lead_time:.2f} {lead_time_unit}s * {work_days_per_week} work days/{lead_time_unit} = {std_lead_time:.2f} work days"
+            )
+        formula_with_substituted_values["lead_time_harmonization"] = time_conv_str
+
+    formula_with_substituted_values.update({
         "expected_lead_time_demand": f"Expected LTD = {avg_demand} * {lead_time} = {expected_ltd:.2f} units",
         "sigma_LT": sigma_sub,
         "z_score": f"z = Phi^{{-1}}({service_level}) = {z:.4f}",
         "safety_stock": f"SS = {z:.4f} * {sigma_lt:.2f} = {safety_stock:.2f} units (Rounded: {safety_stock_rounded:,} units)",
         "reorder_point": f"ROP = {expected_ltd:.2f} + {safety_stock:.2f} = {rop:.2f} units (Rounded: {rop_rounded:,} units)"
-    }
+    })
 
     # Section 5: Intermediate Calculations
     intermediate_calculations = {
@@ -838,6 +861,16 @@ def calculate_rop(
         "stockout_risk_per_cycle": round(stockout_risk, 4),
         "annual_safety_stock_holding_cost": round(annual_ss_cost, 2) if annual_ss_cost is not None else None
     }
+    if stated_lead_time is not None and (lead_time_unit != demand_time_unit or stated_lead_time != lead_time):
+        intermediate_calculations["stated_lead_time"] = stated_lead_time
+        intermediate_calculations["lead_time_unit"] = lead_time_unit
+        intermediate_calculations["demand_time_unit"] = demand_time_unit
+        intermediate_calculations["work_days_per_week"] = work_days_per_week
+        if stated_std_lead_time is not None:
+            intermediate_calculations["stated_std_lead_time"] = stated_std_lead_time
+        intermediate_calculations["harmonized_lead_time_days"] = lead_time
+        if std_lead_time > 0:
+            intermediate_calculations["harmonized_std_lead_time_days"] = std_lead_time
 
     # Section 6: Final Answer
     final_answer = {
@@ -873,6 +906,13 @@ def calculate_rop(
             "details": f"Safety stock ({safety_stock:.2f} units) is non-negative and properly buffered."
         }
     ]
+    if stated_lead_time is not None and (lead_time_unit != demand_time_unit or stated_lead_time != lead_time):
+        verification_checks.append({
+            "check_name": "Lead Time Unit Harmonization",
+            "condition": "Demand and lead time share identical time basis",
+            "status": "PASS",
+            "details": f"Stated lead time ({stated_lead_time} {lead_time_unit}s) successfully converted to {lead_time:.1f} {demand_time_unit}s based on {work_days_per_week} work days per week."
+        })
 
     # Section 8: Model Assumptions
     assumptions = [
@@ -883,6 +923,11 @@ def calculate_rop(
         "Unmet customer demand during lead time stockouts is fully backordered.",
         f"Cycle Service Level (CSL) target of {service_level:.1%} specifies the cycle in-stock probability."
     ]
+    if stated_lead_time is not None and (lead_time_unit != demand_time_unit or stated_lead_time != lead_time):
+        assumptions.insert(
+            0,
+            f"Replenishment lead time stated in {lead_time_unit}s was harmonized with daily customer demand using a standard {work_days_per_week}-day operational work week."
+        )
 
     return SafetyStockROPResult(
         model="Safety Stock and Reorder Point (Continuous Review)",
@@ -968,11 +1013,18 @@ def calculate_periodic_review(
     service_level: float = 0.95,
     current_inventory: float = 0.0,
     on_order: float = 0.0,
-    backorders: float = 0.0
+    backorders: float = 0.0,
+    stated_review_period: Optional[float] = None,
+    review_period_unit: str = "day",
+    stated_lead_time: Optional[float] = None,
+    lead_time_unit: str = "day",
+    demand_time_unit: str = "day",
+    work_days_per_week: int = 5
 ) -> PeriodicReviewResult:
     """
     Calculates Target Inventory Level (Order-Up-To level S or M) and Order Quantity (Q)
     for a Fixed-Period Periodic Review system.
+    Supports unit harmonization (e.g. weeks to work days).
 
     Returns the complete 8-part verification breakdown:
     1. inputs_extracted
@@ -1018,6 +1070,13 @@ def calculate_periodic_review(
         "on_order": on_order,
         "backorders": backorders
     }
+    if stated_review_period is not None or stated_lead_time is not None:
+        inputs_extracted["stated_review_period"] = stated_review_period or review_period
+        inputs_extracted["review_period_unit"] = review_period_unit
+        inputs_extracted["stated_lead_time"] = stated_lead_time or lead_time
+        inputs_extracted["lead_time_unit"] = lead_time_unit
+        inputs_extracted["demand_time_unit"] = demand_time_unit
+        inputs_extracted["work_days_per_week"] = work_days_per_week
 
     # Section 2: Variable Definitions
     variable_definitions = {

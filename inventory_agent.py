@@ -671,10 +671,11 @@ class InventoryDecisionAgent:
         extracted = {}
         missing = []
 
-        # 1. Distinguish lead-time standard deviation first
+        # 1. Distinguish lead-time standard deviation first (including clauses like "lead time is 3 weeks with a std dev of 0.5")
         lt_std = self._find_number_by_patterns(text, [
-            r"(?:lead\s*time|delivery\s*time)\s*(?:standard\s+deviation|std\s*dev|sigma)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)",
+            r"(?:lead\s*time|delivery\s*time)[^.?!;]*(?:with\s+)?(?:a\s+)?(?:standard\s+deviation|std\s*dev|sigma)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)",
             r"(?:standard\s+deviation|std\s*dev|sigma)\s*(?:of\s+)?(?:the\s+)?(?:lead\s*time|delivery\s*time)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)",
+            r"(?:lead\s*time|delivery\s*time)\s*(?:standard\s+deviation|std\s*dev|sigma)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)",
             r"lead\s*time\s*varies\s*(?:with\s*)?(?:a\s*)?(?:standard\s+deviation|std\s*dev)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)",
             r"sigma[_\s]*l\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)"
         ])
@@ -683,7 +684,7 @@ class InventoryDecisionAgent:
 
         # 2. Distinguish demand standard deviation
         d_std = self._find_number_by_patterns(text, [
-            r"(?:demand|daily\s+demand|weekly\s+demand)\s*(?:standard\s+deviation|std\s*dev|sigma)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)",
+            r"(?:demand|daily\s+demand|weekly\s+demand)\s*(?:with\s+)?(?:a\s+)?(?:standard\s+deviation|std\s*dev|sigma)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)",
             r"(?:standard\s+deviation|std\s*dev|sigma)\s*(?:of\s+)?(?:the\s+)?(?:demand|daily\s+demand|weekly\s+demand)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)",
             r"demand\s*varies\s*(?:with\s*)?(?:a\s*)?(?:standard\s+deviation|std\s*dev)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)",
             r"sigma[_\s]*d\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)"
@@ -736,6 +737,67 @@ class InventoryDecisionAgent:
         h = self._find_number_by_patterns(text, [
             r"(?:holding\s+cost|carrying\s+cost)\s*(?:of|is|:|=|at)?\s*\$?([0-9]+(?:\.[0-9]+)?)"
         ])
+
+        # 6. Detect time units for demand and lead time & harmonize if mismatched
+        demand_time_unit = "day"
+        if re.search(r"(?:per\s*|/\s*)week\b|\bweekly\b", text, re.I):
+            demand_time_unit = "week"
+        elif re.search(r"(?:per\s*|/\s*)month\b|\bmonthly\b", text, re.I):
+            demand_time_unit = "month"
+        elif re.search(r"(?:per\s*|/\s*)year\b|\bannual\b", text, re.I):
+            demand_time_unit = "year"
+        elif re.search(r"(?:per\s*|/\s*)day\b|\bdaily\b", text, re.I):
+            demand_time_unit = "day"
+
+        lead_time_unit = "day"
+        m_lt_unit = re.search(r"(?:lead\s*time|delivery\s*time|takes)[^.?!;]*?\b([0-9]+(?:\.[0-9]+)?)\s*(weeks?|days?|months?)\b", text, re.I)
+        if m_lt_unit:
+            u_str = m_lt_unit.group(2).lower()
+            if "week" in u_str: lead_time_unit = "week"
+            elif "month" in u_str: lead_time_unit = "month"
+            elif "day" in u_str: lead_time_unit = "day"
+
+        # Operating work days per week (default 5 for standard business operations)
+        work_days_per_week = 5
+        if re.search(r"\b(?:7\s*days?|seven\s*days?|calendar\s*days?|7\s*days\s*a\s*week)\b", text, re.I):
+            work_days_per_week = 7
+        elif re.search(r"\b(?:6\s*days?|six\s*days?)\b", text, re.I):
+            work_days_per_week = 6
+
+        stated_lt = lt
+        stated_lt_std = lt_std
+        if lt is not None:
+            if demand_time_unit == "day" and lead_time_unit == "week":
+                lt = lt * work_days_per_week
+                if lt_std > 0:
+                    lt_std = lt_std * work_days_per_week
+                extracted["stated_lead_time"] = stated_lt
+                extracted["stated_std_lead_time"] = stated_lt_std
+                extracted["lead_time_unit"] = "week"
+                extracted["demand_time_unit"] = "day"
+                extracted["work_days_per_week"] = work_days_per_week
+                extracted["lead_time_harmonized"] = True
+            elif demand_time_unit == "day" and lead_time_unit == "month":
+                work_days_per_month = 4 * work_days_per_week
+                lt = lt * work_days_per_month
+                if lt_std > 0:
+                    lt_std = lt_std * work_days_per_month
+                extracted["stated_lead_time"] = stated_lt
+                extracted["stated_std_lead_time"] = stated_lt_std
+                extracted["lead_time_unit"] = "month"
+                extracted["demand_time_unit"] = "day"
+                extracted["work_days_per_week"] = work_days_per_week
+                extracted["lead_time_harmonized"] = True
+            elif demand_time_unit == "week" and lead_time_unit == "day":
+                lt = lt / work_days_per_week
+                if lt_std > 0:
+                    lt_std = lt_std / work_days_per_week
+                extracted["stated_lead_time"] = stated_lt
+                extracted["stated_std_lead_time"] = stated_lt_std
+                extracted["lead_time_unit"] = "day"
+                extracted["demand_time_unit"] = "week"
+                extracted["work_days_per_week"] = work_days_per_week
+                extracted["lead_time_harmonized"] = True
 
         if lt is not None: extracted["lead_time"] = lt
         else: missing.append("lead_time (Average replenishment lead time L)")
@@ -823,6 +885,47 @@ class InventoryDecisionAgent:
             on_order = 0.0
         if backorders is None:
             backorders = 0.0
+
+        # 7. Time unit detection & harmonization for periodic review
+        demand_time_unit = "day"
+        if re.search(r"(?:per\s*|/\s*)week\b|\bweekly\b", text, re.I):
+            demand_time_unit = "week"
+        elif re.search(r"(?:per\s*|/\s*)month\b|\bmonthly\b", text, re.I):
+            demand_time_unit = "month"
+        elif re.search(r"(?:per\s*|/\s*)year\b|\bannual\b", text, re.I):
+            demand_time_unit = "year"
+        elif re.search(r"(?:per\s*|/\s*)day\b|\bdaily\b", text, re.I):
+            demand_time_unit = "day"
+
+        work_days_per_week = 5
+        if re.search(r"\b(?:7\s*days?|seven\s*days?|calendar\s*days?|7\s*days\s*a\s*week)\b", text, re.I):
+            work_days_per_week = 7
+        elif re.search(r"\b(?:6\s*days?|six\s*days?)\b", text, re.I):
+            work_days_per_week = 6
+
+        m_p_unit = re.search(r"(?:review|order)\s*(?:every|interval|period)[^.?!;]*?\b([0-9]+(?:\.[0-9]+)?)\s*(weeks?|days?|months?)\b", text, re.I)
+        p_unit = "day"
+        if m_p_unit and "week" in m_p_unit.group(2).lower():
+            p_unit = "week"
+        elif m_p_unit and "month" in m_p_unit.group(2).lower():
+            p_unit = "month"
+
+        m_lt_unit = re.search(r"(?:lead\s*time|delivery\s*time|takes)[^.?!;]*?\b([0-9]+(?:\.[0-9]+)?)\s*(weeks?|days?|months?)\b", text, re.I)
+        lt_unit = "day"
+        if m_lt_unit and "week" in m_lt_unit.group(2).lower():
+            lt_unit = "week"
+        elif m_lt_unit and "month" in m_lt_unit.group(2).lower():
+            lt_unit = "month"
+
+        if demand_time_unit == "day":
+            if p is not None and p_unit == "week":
+                extracted["stated_review_period"] = p
+                extracted["review_period_unit"] = "week"
+                p = p * work_days_per_week
+            if lt is not None and lt_unit == "week":
+                extracted["stated_lead_time"] = lt
+                extracted["lead_time_unit"] = "week"
+                lt = lt * work_days_per_week
 
         if p is not None: extracted["review_period"] = p
         else: missing.append("review_period (Review interval P)")
@@ -1252,13 +1355,26 @@ class InventoryDecisionAgent:
                 f"Whenever inventory drops to {rop_rnd:,} units, place a replenishment order immediately to achieve a **{csl*100:.1f}% Cycle Service Level**."
             )
 
+            # Check if lead time unit conversion occurred
+            if inputs.get("stated_lead_time") and (inputs.get("lead_time_unit") != inputs.get("demand_time_unit") or inputs.get("lead_time_harmonized")):
+                st_lt = inputs["stated_lead_time"]
+                lt_u = inputs.get("lead_time_unit", "week")
+                d_u = inputs.get("demand_time_unit", "day")
+                wd = inputs.get("work_days_per_week", 5)
+                lt_conv_note = f"\n   - **Time Unit Harmonization ({wd}-day work week)**: Stated Lead Time = **{st_lt} {lt_u}s** $\\times$ **{wd} work days/{lt_u}** = **{inputs['lead_time']:.1f} work days**"
+                if inputs.get("stated_std_lead_time") is not None and inputs.get("std_lead_time", 0) > 0:
+                    lt_conv_note += f"; Stated $\\sigma_L$ = **{inputs['stated_std_lead_time']} {lt_u}s** $\\times$ **{wd} work days/{lt_u}** = **{inputs['std_lead_time']:.2f} work days**"
+            else:
+                lt_conv_note = ""
+
+            d_unit_str = inputs.get("demand_time_unit", "period")
             exp = f"""### Analytical Step-by-Step Breakdown
 
-1. **Model Scenario**: **{calc_result['scenario']}**
-   - Average Demand ($d$) = **{inputs['avg_demand']:,}** units/period
-   - Average Lead Time ($L$) = **{inputs['lead_time']}** periods
-   - Demand Std Dev ($\\sigma_d$) = **{inputs.get('std_demand', 0):,}**
-   - Lead Time Std Dev ($\\sigma_L$) = **{inputs.get('std_lead_time', 0):,}**
+1. **Model Scenario**: **{calc_result['scenario']}**{lt_conv_note}
+   - Average Demand ($d$) = **{inputs['avg_demand']:,}** units/{d_unit_str}
+   - Average Lead Time ($L$) = **{inputs['lead_time']}** {d_unit_str}s
+   - Demand Std Dev ($\\sigma_d$) = **{inputs.get('std_demand', 0):,}** units/{d_unit_str}
+   - Lead Time Std Dev ($\\sigma_L$) = **{inputs.get('std_lead_time', 0):,}** {d_unit_str}s
 
 2. **Lead Time Demand & Uncertainty**:
    - **Expected Lead Time Demand**: $\\mu_{{DLT}} = d \\cdot L = {inputs['avg_demand']} \\cdot {inputs['lead_time']} = \\mathbf{{{ltd:,.1f}}} \\text{{ units}}$
@@ -1271,11 +1387,12 @@ class InventoryDecisionAgent:
    - **Cycle Stockout Risk**: **{calc_result['stockout_risk_per_cycle']*100:.2f}%** per replenishment cycle.
 """
 
+            stated_lt_disp = f"{inputs.get('stated_lead_time', inputs['lead_time'])} {inputs.get('lead_time_unit', 'periods')} ({inputs['lead_time']} {d_unit_str}s)" if inputs.get("stated_lead_time") else f"{inputs['lead_time']} periods"
             insights = (
                 f"- **Buffer Protection & Service Assurance**: Maintaining a safety stock buffer of **{ss_rnd:,} units** protects operations against demand and lead-time variability, "
                 f"achieving the target **{csl*100:.1f}% Cycle Service Level**.\n"
                 f"- **Automated Reorder Trigger**: Place a replenishment order immediately when on-hand plus on-order inventory drops to the Reorder Point of **{rop_rnd:,} units** to prevent stockouts during replenishment lead time.\n"
-                f"- **Lead-Time Uncertainty Mitigation**: Replenishment stockout risk is bounded at **{calc_result['stockout_risk_per_cycle']*100:.2f}%** per cycle. Partnering with suppliers to shorten lead time (L = {inputs['lead_time']} periods) or reduce lead time variance directly lowers required safety stock investment."
+                f"- **Lead-Time Uncertainty Mitigation**: Replenishment stockout risk is bounded at **{calc_result['stockout_risk_per_cycle']*100:.2f}%** per cycle. Partnering with suppliers to shorten lead time (L = {stated_lt_disp}) or reduce lead time variance directly lowers required safety stock investment."
             )
 
         elif model_type == InventoryModelType.FIXED_PERIOD_REVIEW:
