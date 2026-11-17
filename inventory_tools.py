@@ -110,7 +110,9 @@ def calculate_eoq(
     ordering_cost: float,
     holding_cost: float,
     unit_cost: Optional[float] = None,
-    work_days_per_year: int = 250
+    work_days_per_year: int = 250,
+    stated_demand: Optional[float] = None,
+    demand_time_unit: str = "year"
 ) -> EOQResult:
     """
     Calculates the Economic Order Quantity (EOQ) and comprehensive inventory cost metrics.
@@ -158,6 +160,9 @@ def calculate_eoq(
         "unit_cost": unit_cost,
         "work_days_per_year": work_days_per_year
     }
+    if stated_demand is not None and demand_time_unit != "year":
+        inputs_extracted["stated_demand"] = f"{stated_demand:,.2f} units/{demand_time_unit}"
+        inputs_extracted["annualized_demand"] = f"{demand:,.2f} units/year"
 
     # Section 2: Variable Definitions
     variable_definitions = {
@@ -197,7 +202,15 @@ def calculate_eoq(
     daily_demand = demand / work_days_per_year
 
     # Section 4: Formulas with Substituted Values
+    mult_str = "12" if demand_time_unit == "month" else ("52" if demand_time_unit == "week" else ("4" if demand_time_unit == "quarter" else str(work_days_per_year)))
+    demand_sub_str = (
+        f"Annual Demand (D) = {stated_demand:,.2f} units/{demand_time_unit} * {mult_str} {demand_time_unit}s/year = {demand:,.2f} units/year"
+        if (stated_demand is not None and demand_time_unit != "year")
+        else f"D = {demand:,.2f} units/year (provided on an annual basis)"
+    )
+
     formula_with_substituted_values = {
+        "annual_demand_conversion": demand_sub_str,
         "eoq": (
             f"EOQ = sqrt((2 * {demand:,.2f} * {ordering_cost:,.2f}) / {holding_cost:,.2f}) "
             f"= sqrt({2.0 * demand * ordering_cost:,.2f} / {holding_cost:,.2f}) "
@@ -240,6 +253,10 @@ def calculate_eoq(
         "cycle_time_days": round(cycle_time_days, 1),
         "daily_demand": round(daily_demand, 2)
     }
+    if stated_demand is not None and demand_time_unit != "year":
+        intermediate_calculations["stated_demand"] = stated_demand
+        intermediate_calculations["demand_time_unit"] = demand_time_unit
+        intermediate_calculations["annualized_demand"] = demand
 
     # Section 6: Final Answer
     final_answer = {
@@ -279,7 +296,12 @@ def calculate_eoq(
 
     # Section 8: Model Assumptions
     assumptions = [
-        "Demand rate is constant, deterministic, and continuous over time.",
+        (
+            f"Demand rate is constant and deterministic at {demand:,.0f} units/year "
+            f"(converted from stated {stated_demand:,.0f} units/{demand_time_unit} to align with annual holding cost horizon)."
+            if (stated_demand is not None and demand_time_unit != "year")
+            else "Demand rate is constant, deterministic, and continuous over time."
+        ),
         "Replenishment lead time is zero or constant and known.",
         "Replenishment arrives in a single batch instantaneously.",
         "Holding cost per unit per year is constant and linear with average inventory (Q/2).",
@@ -403,7 +425,9 @@ def calculate_quantity_discount(
     ordering_cost: float,
     discount_brackets: List[Dict[str, Any]],
     holding_cost_rate: Optional[float] = None,
-    constant_holding_cost: Optional[float] = None
+    constant_holding_cost: Optional[float] = None,
+    stated_demand: Optional[float] = None,
+    demand_time_unit: str = "year"
 ) -> QuantityDiscountResult:
     """
     Evaluates feasible order quantities and compares total annual cost across discount tiers.
@@ -447,6 +471,9 @@ def calculate_quantity_discount(
         "constant_holding_cost": constant_holding_cost,
         "discount_brackets": discount_brackets
     }
+    if stated_demand is not None and demand_time_unit != "year":
+        inputs_extracted["stated_demand"] = f"{stated_demand:,.2f} units/{demand_time_unit}"
+        inputs_extracted["annualized_demand"] = f"{demand:,.2f} units/year"
 
     # Section 2: Variable Definitions
     variable_definitions = {

@@ -326,18 +326,86 @@ class InventoryDecisionAgent:
                 exclude_terms=["holding", "carrying", "unit price", "unit cost", "demand"]
             )
 
-        # 2. Demand
-        d = self._find_number_by_patterns(text, [
-            r"(?:annual\s+demand|yearly\s+demand|demand\s+per\s+year|annual\s+usage|annual\s+sales|demand\s+is|demand\s+of)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)?",
-            r"([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)\s*(?:per|a|\/)\s*year",
-            r"demand\s*[:=]\s*([0-9]+(?:\.[0-9]+)?)"
-        ])
+        # 2. Demand - Prioritize periodic time units (month, week, quarter, day) over generic demand
+        stated_demand = None
+        demand_time_unit = "year"
+        demand_annualized = False
+        d = None
+
+        # Check Monthly Demand
+        m_month = re.search(r"(?:demand|usage|sales|requirement)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)?\s*(?:per\s+month|\/\s*month|a\s+month|\/\s*mo\b|each\s+month|every\s+month)", text, re.IGNORECASE)
+        if not m_month:
+            m_month = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)?\s*(?:per\s+month|\/\s*month|a\s+month|\/\s*mo\b)", text, re.IGNORECASE)
+        if not m_month:
+            m_month = re.search(r"(?:monthly\s+demand|monthly\s+usage|monthly\s+sales|monthly\s+requirement)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)", text, re.IGNORECASE)
+        if m_month:
+            stated_demand = float(m_month.group(1))
+            demand_time_unit = "month"
+            d = stated_demand * 12.0
+            demand_annualized = True
+
+        # Check Weekly Demand
+        if d is None:
+            m_week = re.search(r"(?:demand|usage|sales|requirement)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)?\s*(?:per\s+week|\/\s*week|a\s+week|\/\s*wk\b|each\s+week|every\s+week)", text, re.IGNORECASE)
+            if not m_week:
+                m_week = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)?\s*(?:per\s+week|\/\s*week|a\s+week|\/\s*wk\b)", text, re.IGNORECASE)
+            if not m_week:
+                m_week = re.search(r"(?:weekly\s+demand|weekly\s+usage|weekly\s+sales|weekly\s+requirement)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)", text, re.IGNORECASE)
+            if m_week:
+                stated_demand = float(m_week.group(1))
+                demand_time_unit = "week"
+                d = stated_demand * 52.0
+                demand_annualized = True
+
+        # Check Quarterly Demand
+        if d is None:
+            m_qtr = re.search(r"(?:demand|usage|sales|requirement)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)?\s*(?:per\s+quarter|\/\s*quarter|a\s+quarter|\/\s*qtr\b|each\s+quarter|every\s+quarter)", text, re.IGNORECASE)
+            if not m_qtr:
+                m_qtr = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)?\s*(?:per\s+quarter|\/\s*quarter|a\s+quarter|\/\s*qtr\b)", text, re.IGNORECASE)
+            if not m_qtr:
+                m_qtr = re.search(r"(?:quarterly\s+demand|quarterly\s+usage|quarterly\s+sales|quarterly\s+requirement)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)", text, re.IGNORECASE)
+            if m_qtr:
+                stated_demand = float(m_qtr.group(1))
+                demand_time_unit = "quarter"
+                d = stated_demand * 4.0
+                demand_annualized = True
+
+        # Check Daily Demand
+        if d is None:
+            m_day = re.search(r"(?:demand|usage|sales|requirement)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)?\s*(?:per\s+day|\/\s*day|a\s+day|daily\b|each\s+day|every\s+day)", text, re.IGNORECASE)
+            if not m_day:
+                m_day = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)?\s*(?:per\s+day|\/\s*day|a\s+day|daily\b)", text, re.IGNORECASE)
+            if not m_day:
+                m_day = re.search(r"(?:daily\s+demand|daily\s+usage|daily\s+sales|daily\s+requirement)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)", text, re.IGNORECASE)
+            if m_day:
+                stated_demand = float(m_day.group(1))
+                demand_time_unit = "day"
+                d = stated_demand * 250.0  # 250 operating work days/year
+                demand_annualized = True
+
+        # Check Explicit Annual or General Demand
+        if d is None:
+            d = self._find_number_by_patterns(text, [
+                r"(?:annual\s+demand|yearly\s+demand|demand\s+per\s+year|annual\s+usage|annual\s+sales)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)?",
+                r"([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)\s*(?:per|a|\/)\s*year",
+                r"(?:demand\s+is|demand\s+of)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)?",
+                r"demand\s*[:=]\s*([0-9]+(?:\.[0-9]+)?)"
+            ])
+            if d is not None:
+                stated_demand = d
+                demand_time_unit = "year"
+                demand_annualized = False
+
         if d is None:
             d = self._find_number_by_proximity(
                 text,
                 ["annual demand", "yearly demand", "demand", "annual usage"],
                 exclude_terms=["cost", "order", "holding", "setup"]
             )
+            if d is not None:
+                stated_demand = d
+                demand_time_unit = "year"
+                demand_annualized = False
 
         # 3. Unit Cost / Purchase Price
         c = self._find_number_by_patterns(text, [
@@ -346,12 +414,42 @@ class InventoryDecisionAgent:
             r"costs\s*\$?([0-9]+(?:\.[0-9]+)?)\s*(?:each|per\s+unit)"
         ])
 
-        # 4. Holding Cost (fixed dollar amount or percentage)
-        h = self._find_number_by_patterns(text, [
-            r"(?:holding\s+cost|carrying\s+cost|holding\s+expense|carrying\s+expense|storage\s+cost)\s*(?:of|is|:|=|at)?\s*\$?([0-9]+(?:\.[0-9]+)?)(?!\s*%)",
-            r"\$?([0-9]+(?:\.[0-9]+)?)\s*(?:per\s+unit\s+per\s+year|\/\s*unit\s*\/\s*year|\/\s*unit\s+annually|per\s+unit\s+annually)",
-            r"holding\s*[:=]\s*\$?([0-9]+(?:\.[0-9]+)?)"
-        ])
+        # 4. Holding Cost (Check monthly/weekly holding cost or annual)
+        stated_holding_cost = None
+        holding_time_unit = "year"
+        holding_annualized = False
+        h = None
+
+        m_h_month = re.search(r"\$?([0-9]+(?:\.[0-9]+)?)\s*(?:per\s+unit\s+per\s+month|\/\s*unit\s*\/\s*month|per\s+unit\s+monthly|\/\s*unit\s+monthly|\/\s*month\s*\/\s*unit)", text, re.IGNORECASE)
+        if not m_h_month:
+            m_h_month = re.search(r"(?:monthly\s+holding\s+cost|monthly\s+carrying\s+cost)\s*(?:of|is|:|=|at)?\s*\$?([0-9]+(?:\.[0-9]+)?)", text, re.IGNORECASE)
+        if m_h_month:
+            stated_holding_cost = float(m_h_month.group(1))
+            holding_time_unit = "month"
+            h = stated_holding_cost * 12.0
+            holding_annualized = True
+
+        if h is None:
+            m_h_week = re.search(r"\$?([0-9]+(?:\.[0-9]+)?)\s*(?:per\s+unit\s+per\s+week|\/\s*unit\s*\/\s*week|per\s+unit\s+weekly|\/\s*unit\s+weekly)", text, re.IGNORECASE)
+            if not m_h_week:
+                m_h_week = re.search(r"(?:weekly\s+holding\s+cost|weekly\s+carrying\s+cost)\s*(?:of|is|:|=|at)?\s*\$?([0-9]+(?:\.[0-9]+)?)", text, re.IGNORECASE)
+            if m_h_week:
+                stated_holding_cost = float(m_h_week.group(1))
+                holding_time_unit = "week"
+                h = stated_holding_cost * 52.0
+                holding_annualized = True
+
+        if h is None:
+            h = self._find_number_by_patterns(text, [
+                r"(?:holding\s+cost|carrying\s+cost|holding\s+expense|carrying\s+expense|storage\s+cost)\s*(?:of|is|:|=|at)?\s*\$?([0-9]+(?:\.[0-9]+)?)(?!\s*%)",
+                r"\$?([0-9]+(?:\.[0-9]+)?)\s*(?:per\s+unit\s+per\s+year|\/\s*unit\s*\/\s*year|\/\s*unit\s+annually|per\s+unit\s+annually|\/\s*year\s*\/\s*unit)",
+                r"holding\s*[:=]\s*\$?([0-9]+(?:\.[0-9]+)?)"
+            ])
+            if h is not None:
+                stated_holding_cost = h
+                holding_time_unit = "year"
+                holding_annualized = False
+
         h_rate = self._find_number_by_patterns(text, [
             r"(?:percentage\s+holding\s+cost|holding\s+cost\s+rate|carrying\s+cost\s+rate|holding\s+rate|carrying\s+rate|cost\s+of\s+capital|carrying\s+charge|holding\s+cost\s+is|carrying\s+cost\s+is)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)\s*%",
             r"([0-9]+(?:\.[0-9]+)?)\s*%\s*(?:holding\s+cost|carrying\s+cost|holding\s+rate|carrying\s+rate|carrying\s+charge|of\s+unit\s+cost|of\s+unit\s+price)"
@@ -360,23 +458,43 @@ class InventoryDecisionAgent:
         if h is None and h_rate is not None and c is not None:
             rate_frac = h_rate / 100.0 if h_rate > 1.0 else h_rate
             h = rate_frac * c
+            stated_holding_cost = h
+            holding_time_unit = "year"
+            holding_annualized = False
         elif h is None:
             h = self._find_number_by_proximity(
                 text,
                 ["holding cost", "carrying cost", "holding expense", "carrying expense"],
                 exclude_terms=["setup", "order", "demand"]
             )
+            if h is not None:
+                stated_holding_cost = h
+                holding_time_unit = "year"
+                holding_annualized = False
 
-        if d is not None: extracted["demand"] = d
-        else: missing.append("demand (Annual demand D in units)")
+        if d is not None:
+            extracted["demand"] = d
+            extracted["stated_demand"] = stated_demand if stated_demand is not None else d
+            extracted["demand_time_unit"] = demand_time_unit
+            extracted["demand_annualized"] = demand_annualized
+        else:
+            missing.append("demand (Annual demand D in units)")
 
-        if s is not None: extracted["ordering_cost"] = s
-        else: missing.append("ordering_cost (Ordering/Setup cost S in $)")
+        if s is not None:
+            extracted["ordering_cost"] = s
+        else:
+            missing.append("ordering_cost (Ordering/Setup cost S in $)")
 
-        if h is not None: extracted["holding_cost"] = h
-        else: missing.append("holding_cost (Annual holding cost H per unit in $ or holding % + unit cost)")
+        if h is not None:
+            extracted["holding_cost"] = h
+            extracted["stated_holding_cost"] = stated_holding_cost if stated_holding_cost is not None else h
+            extracted["holding_time_unit"] = holding_time_unit
+            extracted["holding_annualized"] = holding_annualized
+        else:
+            missing.append("holding_cost (Annual holding cost H per unit in $ or holding % + unit cost)")
 
-        if c is not None: extracted["unit_cost"] = c
+        if c is not None:
+            extracted["unit_cost"] = c
 
         return extracted, missing
 
@@ -384,14 +502,77 @@ class InventoryDecisionAgent:
         extracted = {}
         missing = []
 
-        # 1. Demand
-        d = self._find_number_by_patterns(text, [
-            r"(?:annual\s+demand|yearly\s+demand|demand\s+is|demand\s+of|demand)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts)?",
-            r"([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts)\s*(?:per|a|\/)\s*year",
-            r"demand\s*[:=]\s*([0-9]+(?:\.[0-9]+)?)"
-        ])
+        # 1. Demand - Prioritize periodic time units (month, week, quarter, day) over generic demand
+        stated_demand = None
+        demand_time_unit = "year"
+        demand_annualized = False
+        d = None
+
+        m_month = re.search(r"(?:demand|usage|sales|requirement)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)?\s*(?:per\s+month|\/\s*month|a\s+month|\/\s*mo\b|each\s+month|every\s+month)", text, re.IGNORECASE)
+        if not m_month:
+            m_month = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)?\s*(?:per\s+month|\/\s*month|a\s+month|\/\s*mo\b)", text, re.IGNORECASE)
+        if not m_month:
+            m_month = re.search(r"(?:monthly\s+demand|monthly\s+usage|monthly\s+sales|monthly\s+requirement)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)", text, re.IGNORECASE)
+        if m_month:
+            stated_demand = float(m_month.group(1))
+            demand_time_unit = "month"
+            d = stated_demand * 12.0
+            demand_annualized = True
+
+        if d is None:
+            m_week = re.search(r"(?:demand|usage|sales|requirement)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)?\s*(?:per\s+week|\/\s*week|a\s+week|\/\s*wk\b|each\s+week|every\s+week)", text, re.IGNORECASE)
+            if not m_week:
+                m_week = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)?\s*(?:per\s+week|\/\s*week|a\s+week|\/\s*wk\b)", text, re.IGNORECASE)
+            if not m_week:
+                m_week = re.search(r"(?:weekly\s+demand|weekly\s+usage|weekly\s+sales|weekly\s+requirement)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)", text, re.IGNORECASE)
+            if m_week:
+                stated_demand = float(m_week.group(1))
+                demand_time_unit = "week"
+                d = stated_demand * 52.0
+                demand_annualized = True
+
+        if d is None:
+            m_qtr = re.search(r"(?:demand|usage|sales|requirement)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)?\s*(?:per\s+quarter|\/\s*quarter|a\s+quarter|\/\s*qtr\b|each\s+quarter|every\s+quarter)", text, re.IGNORECASE)
+            if not m_qtr:
+                m_qtr = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)?\s*(?:per\s+quarter|\/\s*quarter|a\s+quarter|\/\s*qtr\b)", text, re.IGNORECASE)
+            if not m_qtr:
+                m_qtr = re.search(r"(?:quarterly\s+demand|quarterly\s+usage|quarterly\s+sales|quarterly\s+requirement)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)", text, re.IGNORECASE)
+            if m_qtr:
+                stated_demand = float(m_qtr.group(1))
+                demand_time_unit = "quarter"
+                d = stated_demand * 4.0
+                demand_annualized = True
+
+        if d is None:
+            m_day = re.search(r"(?:demand|usage|sales|requirement)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)?\s*(?:per\s+day|\/\s*day|a\s+day|daily\b|each\s+day|every\s+day)", text, re.IGNORECASE)
+            if not m_day:
+                m_day = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts|cases)?\s*(?:per\s+day|\/\s*day|a\s+day|daily\b)", text, re.IGNORECASE)
+            if not m_day:
+                m_day = re.search(r"(?:daily\s+demand|daily\s+usage|daily\s+sales|daily\s+requirement)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)", text, re.IGNORECASE)
+            if m_day:
+                stated_demand = float(m_day.group(1))
+                demand_time_unit = "day"
+                d = stated_demand * 250.0  # 250 work days
+                demand_annualized = True
+
+        if d is None:
+            d = self._find_number_by_patterns(text, [
+                r"(?:annual\s+demand|yearly\s+demand|demand\s+per\s+year|annual\s+usage|annual\s+sales)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts)?",
+                r"([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts)\s*(?:per|a|\/)\s*year",
+                r"(?:demand\s+is|demand\s+of)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:units|items|parts)?",
+                r"demand\s*[:=]\s*([0-9]+(?:\.[0-9]+)?)"
+            ])
+            if d is not None:
+                stated_demand = d
+                demand_time_unit = "year"
+                demand_annualized = False
+
         if d is None:
             d = self._find_number_by_proximity(text, ["annual demand", "demand", "yearly demand"], exclude_terms=["cost", "order", "price"])
+            if d is not None:
+                stated_demand = d
+                demand_time_unit = "year"
+                demand_annualized = False
 
         # 2. Ordering cost (supports all 7 synonyms)
         s = self._find_number_by_patterns(text, [
@@ -460,8 +641,13 @@ class InventoryDecisionAgent:
                     current_price = break_price
                 brackets.append({"min_qty": current_min, "max_qty": None, "unit_price": current_price})
 
-        if d is not None: extracted["demand"] = d
-        else: missing.append("demand (Annual demand D)")
+        if d is not None:
+            extracted["demand"] = d
+            extracted["stated_demand"] = stated_demand if stated_demand is not None else d
+            extracted["demand_time_unit"] = demand_time_unit
+            extracted["demand_annualized"] = demand_annualized
+        else:
+            missing.append("demand (Annual demand D)")
 
         if s is not None: extracted["ordering_cost"] = s
         else: missing.append("ordering_cost (Ordering cost S)")
@@ -775,7 +961,10 @@ class InventoryDecisionAgent:
     # =========================================================================
     def calculate(self, tool: Callable, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """Executes the mathematical tool function."""
-        result = tool(**inputs)
+        import inspect
+        sig = inspect.signature(tool)
+        valid_kwargs = {k: v for k, v in inputs.items() if k in sig.parameters}
+        result = tool(**valid_kwargs)
         return result.to_dict()
 
     # =========================================================================
@@ -943,13 +1132,33 @@ class InventoryDecisionAgent:
                     f"\n   - **Total Cost (Inventory + Goods)**: **${calc_result['total_annual_cost']:,.2f}**"
                 )
 
+            if inputs.get("demand_annualized") and inputs.get("stated_demand"):
+                unit_str = inputs.get("demand_time_unit", "period")
+                multiplier = 12 if unit_str == "month" else (52 if unit_str == "week" else (4 if unit_str == "quarter" else 250))
+                demand_line = (
+                    f"   - Stated Demand = **{inputs['stated_demand']:,.1f} units/{unit_str}**\n"
+                    f"   - **Annualized Demand ($D$)** = {inputs['stated_demand']:,.1f} units/{unit_str} $\\times$ {multiplier} {unit_str}s/year = **{inputs['demand']:,.1f} units/year**"
+                )
+            else:
+                demand_line = f"   - Annual Demand ($D$) = **{inputs['demand']:,}** units"
+
+            if inputs.get("holding_annualized") and inputs.get("stated_holding_cost"):
+                h_unit = inputs.get("holding_time_unit", "period")
+                h_mult = 12 if h_unit == "month" else (52 if h_unit == "week" else 4)
+                holding_line = (
+                    f"   - Stated Holding Cost = **\\${inputs['stated_holding_cost']:,.2f} per unit/{h_unit}**\n"
+                    f"   - **Annualized Holding Cost ($H$)** = \\${inputs['stated_holding_cost']:,.2f} $\\times$ {h_mult} = **\\${inputs['holding_cost']:,.2f} per unit/year**"
+                )
+            else:
+                holding_line = f"   - Annual Holding Cost ($H$) = **\\${inputs['holding_cost']:,.2f}** per unit/year"
+
             exp = f"""### Analytical Step-by-Step Breakdown
 
 1. **Economic Order Quantity Formula**:
    $$\\text{{EOQ}} = \\sqrt{{\\frac{{2 \\cdot D \\cdot S}}{{H}}}}$$
-   - Annual Demand ($D$) = **{inputs['demand']:,}** units
+{demand_line}
    - Ordering / Setup Cost ($S$) = **\\${inputs['ordering_cost']:,.2f}** per order
-   - Annual Holding Cost ($H$) = **\\${inputs['holding_cost']:,.2f}** per unit/year
+{holding_line}
    
 2. **Calculation**:
    $$\\text{{EOQ}} = \\sqrt{{\\frac{{2 \\cdot {inputs['demand']:,} \\cdot {inputs['ordering_cost']}}}{{{inputs['holding_cost']}}}}} = \\sqrt{{{2 * inputs['demand'] * inputs['ordering_cost'] / inputs['holding_cost']:,.2f}}} = \\mathbf{{{eoq:,.2f}}} \\text{{ units}}$$
@@ -999,6 +1208,13 @@ class InventoryDecisionAgent:
                 )
             tier_rows = "\n".join(rows)
 
+            if inputs.get("demand_annualized") and inputs.get("stated_demand"):
+                unit_str = inputs.get("demand_time_unit", "period")
+                multiplier = 12 if unit_str == "month" else (52 if unit_str == "week" else (4 if unit_str == "quarter" else 250))
+                qd_demand_note = f"\n   - *Demand Annualization*: Stated demand of **{inputs['stated_demand']:,.1f} units/{unit_str}** was annualized to $D =$ **{inputs['demand']:,.1f} units/year** ({inputs['stated_demand']:,.1f} $\\times$ {multiplier} {unit_str}s/year) to match the annual holding cost horizon."
+            else:
+                qd_demand_note = ""
+
             exp = f"""### Analytical Step-by-Step Breakdown
 
 1. **Discount Tier Evaluation Matrix**:
@@ -1008,7 +1224,7 @@ class InventoryDecisionAgent:
 {tier_rows}
 
 2. **Decision Logic**:
-   - For each price tier, unconstrained $EOQ_i = \\sqrt{{\\frac{{2DS}}{{H_i}}}}$ is computed.
+   - For each price tier, unconstrained $EOQ_i = \\sqrt{{\\frac{{2DS}}{{H_i}}}}$ is computed using annual demand $D = \\mathbf{{{inputs['demand']:,}}}$.{qd_demand_note}
    - If $EOQ_i$ falls below the discount threshold, ordering exactly the minimum threshold quantity yields the lowest cost in that bracket.
    - Evaluating total annual costs (Purchase + Ordering + Holding) confirms **Tier {opt_tier}** with **{opt_q:,.0f} units** minimizes global total cost.
 """
