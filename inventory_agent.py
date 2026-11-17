@@ -164,6 +164,15 @@ class InventoryDecisionAgent:
             scores[InventoryModelType.QUANTITY_DISCOUNT] += 6.0
         if re.search(r"\$\d+.*(?:for|if order).*?(?:unit|piece|order)", text):
             scores[InventoryModelType.QUANTITY_DISCOUNT] += 5.0
+        # Tiered pricing cues without the word 'discount' (e.g. '$12 below 500, $11.50 for 500-999, $11 for 1000 or more')
+        has_tiered_pricing = bool(
+            re.search(r"\$\d+(?:\.\d+)?\s*(?:per\s+unit|\/\s*unit|\beach)?\s*(?:for\s+(?:orders\s+)?)?(?:below|under|<|>|>=|\+|\d+\s*-\s*\d+|\d+\s*to\s*\d+|or\s+more)", text) or
+            re.search(r"(?:orders?\s+(?:of\s+|for\s+)?(?:below|under|<|\d+\s*-\s*\d+|\d+\s*to\s*\d+|or\s+more))\s*.*?\$\d+", text) or
+            len(re.findall(r"\$\d+(?:\.\d+)?\s*(?:per\s+unit|\/\s*unit|\beach)", text)) >= 2 or
+            (len(re.findall(r"\$\d+(?:\.\d+)?", text)) >= 3 and any(k in text for k in ["below", "under", "or more", "to", "-"]))
+        )
+        if has_tiered_pricing:
+            scores[InventoryModelType.QUANTITY_DISCOUNT] += 12.0
 
         # Newsvendor cues
         if any(w in text for w in ["newsvendor", "newsboy", "single period", "single-period", "critical fractile", "critical ratio"]):
@@ -204,6 +213,11 @@ class InventoryDecisionAgent:
             scores[InventoryModelType.EOQ] += 4.0
 
         # Disambiguation rules
+        # If both Quantity Discount and EOQ score, but tiered pricing / price breaks are present, Quantity Discount MUST win
+        if scores[InventoryModelType.QUANTITY_DISCOUNT] > 0 and scores[InventoryModelType.EOQ] > 0:
+            if has_tiered_pricing or any(w in text for w in ["discount", "tier", "bracket", "price break", "schedule"]):
+                scores[InventoryModelType.QUANTITY_DISCOUNT] = max(scores[InventoryModelType.QUANTITY_DISCOUNT], scores[InventoryModelType.EOQ] + 6.0)
+
         # If both fixed period and safety stock score high, check for periodic review keywords
         if scores[InventoryModelType.FIXED_PERIOD_REVIEW] > 0 and scores[InventoryModelType.SAFETY_STOCK_ROP] > 0:
             if any(w in text for w in ["review period", "review every", "order up to", "order-up-to"]):
@@ -585,12 +599,15 @@ class InventoryDecisionAgent:
         # 3. Holding cost: distinguish fixed holding cost vs percentage holding cost
         h_rate = self._find_number_by_patterns(text, [
             r"(?:percentage\s+holding\s+cost|holding\s+cost\s+rate|carrying\s+cost\s+rate|holding\s+rate|carrying\s+rate|holding\s+percentage|carrying\s+percentage|annual\s+carrying\s+charge|cost\s+of\s+capital)\s*(?:of|is|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)\s*%",
-            r"([0-9]+(?:\.[0-9]+)?)\s*%\s*(?:holding\s+cost|carrying\s+cost|holding\s+rate|carrying\s+rate|carrying\s+charge|of\s+unit\s+price|of\s+purchase\s+price)"
+            r"([0-9]+(?:\.[0-9]+)?)\s*%\s*(?:holding\s+cost|carrying\s+cost|holding\s+rate|carrying\s+rate|carrying\s+charge|of\s+unit\s+price|of\s+purchase\s+price|of\s+unit\s+cost|of\s+product\s+cost|of\s+item\s+cost|of\s+cost)",
+            r"(?:annual\s+holding\s+cost|holding\s+cost|carrying\s+cost)\s*(?:is|of|:|=|at)?\s*([0-9]+(?:\.[0-9]+)?)\s*%"
         ])
-        h_const = self._find_number_by_patterns(text, [
-            r"(?:fixed\s+holding\s+cost|constant\s+holding\s+cost|holding\s+cost\s+is|carrying\s+cost\s+is)\s*(?:of|is|:|=|at)?\s*\$?([0-9]+(?:\.[0-9]+)?)(?!\s*%)",
-            r"\$?([0-9]+(?:\.[0-9]+)?)\s*(?:per\s+unit\s+per\s+year|\/\s*unit\s*\/\s*year|\/\s*unit\s+annually|per\s+unit\s+annually)"
-        ])
+        h_const = None
+        if h_rate is None:
+            h_const = self._find_number_by_patterns(text, [
+                r"(?:fixed\s+holding\s+cost|constant\s+holding\s+cost|holding\s+cost\s+is|carrying\s+cost\s+is)\s*(?:of|is|:|=|at)?\s*\$?([0-9]+(?:\.[0-9]+)?)\b(?!\s*%)",
+                r"\$?([0-9]+(?:\.[0-9]+)?)\s*(?:per\s+unit\s+per\s+year|\/\s*unit\s*\/\s*year|\/\s*unit\s+annually|per\s+unit\s+annually)\b(?!\s*%)"
+            ])
 
         # 4. Unit purchase price (base price if specified)
         base_price = self._find_number_by_patterns(text, [
@@ -599,6 +616,7 @@ class InventoryDecisionAgent:
 
         # 5. Quantity break discount tiers
         brackets = []
+        # Format A: Range then Price (e.g. "1-499 units at $5.00", "500-999 units at $4.50", "1000+ units at $4.00")
         tier_matches = re.findall(
             r"(\d+)\s*(?:-|to)\s*(\d+)\s*(?:units)?\s*[:@=at,]*\s*\$?([0-9]+(?:\.[0-9]+)?)",
             text,
@@ -619,6 +637,64 @@ class InventoryDecisionAgent:
         for m in open_matches:
             min_q = float(m[0] if m[0] else m[1])
             price = float(m[2])
+            brackets.append({
+                "min_qty": min_q,
+                "max_qty": None,
+                "unit_price": price
+            })
+
+        below_matches = re.findall(
+            r"(?:orders?\s+)?(?:below|under|<)\s*(\d+)\s*(?:units)?\s*[:@=at,]*\s*\$?([0-9]+(?:\.[0-9]+)?)",
+            text,
+            re.IGNORECASE
+        )
+        for m in below_matches:
+            cutoff = float(m[0])
+            price = float(m[1])
+            brackets.append({
+                "min_qty": 1.0,
+                "max_qty": cutoff - 1,
+                "unit_price": price
+            })
+
+        # Format B: Price then Range (e.g. "$12 for orders below 500", "$11.50 for 500-999", "$11 for orders of 1000 or more")
+        p_below_matches = re.findall(
+            r"\$([0-9]+(?:\.[0-9]+)?)\s*(?:per\s+unit|\/\s*unit|\beach)?\s*(?:for\s+(?:orders\s+)?)?(?:below|under|<)\s*(\d+)",
+            text,
+            re.IGNORECASE
+        )
+        for m in p_below_matches:
+            price = float(m[0])
+            cutoff = float(m[1])
+            brackets.append({
+                "min_qty": 1.0,
+                "max_qty": cutoff - 1,
+                "unit_price": price
+            })
+
+        p_range_matches = re.findall(
+            r"\$([0-9]+(?:\.[0-9]+)?)\s*(?:per\s+unit|\/\s*unit|\beach)?\s*(?:for\s+(?:orders\s+(?:of\s+)?)?)?(\d+)\s*(?:-|to)\s*(\d+)",
+            text,
+            re.IGNORECASE
+        )
+        for m in p_range_matches:
+            price = float(m[0])
+            min_q = float(m[1])
+            max_q = float(m[2])
+            brackets.append({
+                "min_qty": min_q,
+                "max_qty": max_q,
+                "unit_price": price
+            })
+
+        p_open_matches = re.findall(
+            r"\$([0-9]+(?:\.[0-9]+)?)\s*(?:per\s+unit|\/\s*unit|\beach)?\s*(?:for\s+(?:orders\s+(?:of\s+)?)?)?(\d+)\s*(?:units\s+)?(?:or\s+more|\+|and\s+over|above|and\s+up)",
+            text,
+            re.IGNORECASE
+        )
+        for m in p_open_matches:
+            price = float(m[0])
+            min_q = float(m[1])
             brackets.append({
                 "min_qty": min_q,
                 "max_qty": None,
